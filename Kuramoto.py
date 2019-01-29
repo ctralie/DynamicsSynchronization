@@ -5,12 +5,14 @@ import sklearn.feature_extraction.image as skimage
 from sklearn import manifold
 import umap
 import time
+from scipy import interpolate
 from mpl_toolkits.mplot3d import Axes3D
 from ripser import ripser, plot_dgms
 import sys
 sys.path.append("DREiMac")
 from CircularCoordinates import CircularCoords
 from DiffusionMaps import *
+from LocalPCA import *
 
 def makeVideo(Y, I, Xs, Ts, pd, colorvar):
     c = plt.get_cmap('magma_r')
@@ -153,7 +155,131 @@ def doDiffusionMaps(patches, Xs, Ts, ts):
 
     return Y
 
-def testKS_NLDM(pd = (200, 1), sub=(2, 1), nperm = 600):
+
+
+
+
+
+
+
+
+
+
+
+
+
+class KSSimulation(object):
+    """
+    Attributes
+    ----------
+    I: ndarray(T, S)
+        The full Kuramoto Sivashinsky spacetime grid
+    ts: ndarray(T)
+        Times corresponding to each row of I
+    patches: ndarray(N, d)
+        An array of d-dimensional observations
+    Xs: ndarray(N)
+        Spatial indices of the left of each patch into I
+    Ts: ndarray(N)
+        Time indices of the top of each patch into I
+    pd: tuple(int, int)
+        The dimensions of each patch (height, width)
+    f: function ndarray->ndarray
+        A pointwise homeomorphism to apply to pixels in the observation function
+    """
+    def __init__(self):
+        res = sio.loadmat("KS.mat")
+        I = res["data"]
+        self.I = I
+        self.ts = np.linspace(res["tmin"].flatten(), res["tmax"].flatten(), I.shape[0])
+    
+    def makeObservations(self, pd, sub, tidx_max, f = lambda x: x):
+        """
+        Create an observation 
+        Parameters
+        ----------
+        pd: tuple(int, int)
+            The dimensions of each patch (height, width)
+        sub: tuple(int, int)
+            The factor by which to subsample the patches across each dimension
+        f: function ndarray->ndarray
+            A pointwise homeomorphism to apply to pixels in the observation function
+        tidx_max: int
+            Maximum time index to include in any observation window
+        """
+        I = self.I[0:tidx_max, :]
+        I = np.concatenate((I, I[:, 0:pd[1]]), 1) # Do periodic padding
+        M, N = I.shape[0], I.shape[1]
+        patches = skimage.extract_patches_2d(I, pd)
+        patches = np.reshape(patches, (M-pd[0]+1, N-pd[1]+1, pd[0], pd[1]))
+        # Index by spatial coordinate and by time
+        Xs, Ts = np.meshgrid(np.arange(patches.shape[1]), np.arange(patches.shape[0]))
+        # Subsample patches
+        patches = patches[0::sub[0], 0::sub[1], :, :]
+        Xs = Xs[0::sub[0], 0::sub[1]]
+        Ts = Ts[0::sub[0], 0::sub[1]]
+        Xs = Xs.flatten()
+        Ts = Ts.flatten()
+        self.Xs = Xs
+        self.Ts = Ts
+        self.patches = np.reshape(patches, (patches.shape[0]*patches.shape[1], pd[0]*pd[1]))
+        self.pd = pd
+        self.f = f
+    
+    def getJacobians(self, r, n_points):
+        """
+        To quote from the Singer/Coifman paper:
+        "Suppose that we can identify which data points y (j ) belong to the 
+                ellipsoid E y (i) ,δ and which reside outside it"
+        Assume that an "equal space" ellipse is a circle of radius "r"
+        in spacetime (since we are trying to find a map back to spacetime).  
+        Sample points uniformly at random within that disc, and
+        use observations centered at those points
+        Parameters
+        ----------
+        r: float
+            Spacetime radius from which to sample
+        n_points: int
+            Number of points to sample in the disc
+        """
+        ## Step 1: Setup interpolator
+        I = self.I
+        I = np.concatenate((I, I, I), 1) #Periodic boundary conditions in space
+        x = np.arange(I.shape[1])
+        x = x[None, :]*np.ones((3, 1))
+        x[0, :] -= I.shape[1]
+        x[2, :] += I.shape[1]
+        t = np.arange(I.shape[0])
+        f_interp = interpolate.interp2d(x, t, I, bounds_error=True)
+
+        ## Step 2: For each patch, sample near patches
+        ## and compute Jacobian
+        pdx, pdt = np.meshgrid(np.arange(self.pd[1]), np.arange(self.pd[0]))
+        pdx = pdx.flatten()
+        pdt = pdt.flatten()
+        for i in range(self.patches.shape[0]):
+            x0 = self.Xs[i]
+            t0 = self.Ts[i]
+            rs = r*np.sqrt(np.random.rand(n_points))
+            thetas = np.pi*np.random.rand(n_points)
+            xs = x0 + rs*np.cos(thetas) # Left of each patch sample
+            ts = t0 + rs*np.sin(thetas) # Top of each patch sample
+            xs = xs[:, None] + pdx[None, :]
+            ts = ts[:, None] + pdt[None, :]
+            Y = self.f(f_interp(xs.flatten(), ts.flatten()))
+            Y = np.reshape(Y, (n_points, pdx.size))
+
+            ## TODO: Finish computing jacobian
+            
+
+
+        
+
+
+
+
+
+def testKS_NLDM(pd = (150, 1), sub=(2, 1), nperm = 600):
     """
     Test a nonlinear dimension reduction of the Kuramoto Sivashinsky Equation
     torus attractor
@@ -166,36 +292,22 @@ def testKS_NLDM(pd = (200, 1), sub=(2, 1), nperm = 600):
     nperm: int
         Number of points to take in a greedy permutation
     """
+    ks = KSSimulation()
+    ks.makeObservations(pd, sub, -50)
+    #Y = do_umap_and_tda(pd, sub, nperm, ks.patches, ks.I, ks.Xs, ks.Ts, ks.ts)
+    Y = doDiffusionMaps(ks.patches, ks.Xs, ks.Ts, ks.ts)
+    makeVideo(Y, ks.I, ks.Xs, ks.Ts, pd, ks.Ts)
+
+
+
+
+
+def testKS_Mahalanobis():
     res = sio.loadmat("KS.mat")
     I = res["data"]
     ts = np.linspace(res["tmin"].flatten(), res["tmax"].flatten(), I.shape[0])
-    #I = I[0:106, :]
-    ts = ts[0:I.shape[0]]
-    IOrig = np.array(I)
-    I = np.concatenate((I, I[:, 0:pd[1]]), 1) # Do periodic padding
-    M, N = I.shape[0], I.shape[1]
-    patches = skimage.extract_patches_2d(I, pd)
-    patches = np.reshape(patches, (M-pd[0]+1, N-pd[1]+1, pd[0], pd[1]))
-    # Index by spatial coordinate and by time
-    Xs, Ts = np.meshgrid(np.arange(patches.shape[1]), np.arange(patches.shape[0]))
-    # Subsample patches
-    patches = patches[0::sub[0], 0::sub[1], :, :]
-    Xs = Xs[0::sub[0], 0::sub[1]]
-    Ts = Ts[0::sub[0], 0::sub[1]]
-    Xs = Xs.flatten()
-    Ts = Ts.flatten()
-    patches = np.reshape(patches, (patches.shape[0]*patches.shape[1], pd[0]*pd[1]))
-
-
-
-
-    #Y = do_umap_and_tda(pd, sub, nperm, patches, I, Xs, Ts, ts)
-    Y = doDiffusionMaps(patches, Xs, Ts, ts)
-    #Y = manifold.LocallyLinearEmbedding(n_neighbors=10, n_components=3, eigen_solver='auto', method='standard').fit_transform(patches)
-    #Y = manifold.Isomap(n_neighbors=10, n_components=2).fit_transform(patches)
-    makeVideo(Y, IOrig, Xs, Ts, pd, Ts)
-
 
 
 if __name__ == '__main__':
     testKS_NLDM()
+    #testKS_Mahalanobis()

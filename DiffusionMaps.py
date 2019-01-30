@@ -20,16 +20,20 @@ def getSSM(X):
     D = np.sqrt(D)
     return D
 
-def getDiffusionMap(X, eps, neigs = 4, thresh=5e-4):
+def getDiffusionMap(X, eps, distance_matrix=False, neigs = 4, thresh=5e-4):
     """
     Perform diffusion maps with a unit timestep, automatically
     normalizing for nonuniform sampling
     Parameters
     ----------
-    X: ndarray(N, d)
+    X: ndarray(N, d) or ndarray(N, N)
         A point cloud with N points in d dimensions
+        or an NxN squared distance matrix
     eps: float
         Kernel scale parameter
+    distance_matrix: boolean
+        If false, treat X as a point cloud
+        If true, then treat X as a squared distance matrix
     neigs: int
         Number of eigenvectors to compute
     thresh: float
@@ -38,8 +42,11 @@ def getDiffusionMap(X, eps, neigs = 4, thresh=5e-4):
     """
     tic = time.time()
     print("Building diffusion map matrix...")
-    D = np.sum(X**2, 1)[:, None]
-    DSqr = D + D.T - 2*X.dot(X.T)
+    if distance_matrix:
+        DSqr = X
+    else:
+        D = np.sum(X**2, 1)[:, None]
+        DSqr = D + D.T - 2*X.dot(X.T)
     K = np.exp(-DSqr/(2*eps))
     P = np.sum(K, 1)
     P[P == 0] = 1
@@ -48,13 +55,10 @@ def getDiffusionMap(X, eps, neigs = 4, thresh=5e-4):
     KHat[KHat < thresh] = 0
     KHat = sparse.csc_matrix(KHat)
     M = sparse.diags(dRow).tocsc()
-
     print("Elapsed Time: %.3g"%(time.time()-tic))
-
     print("Solving eigen system...")
     tic = time.time()
     # Solve a generalized eigenvalue problem
-
     w, v = sparse.linalg.eigsh(KHat, k=neigs, M=M, which='LM')
     print("Elapsed Time: %.3g"%(time.time()-tic))
     return w[None, :]*v

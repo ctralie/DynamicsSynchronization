@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.io as sio
+import scipy.linalg as slinalg
 import matplotlib.pyplot as plt
 import sklearn.feature_extraction.image as skimage
 from sklearn import manifold
@@ -9,18 +10,19 @@ from scipy import interpolate
 from mpl_toolkits.mplot3d import Axes3D
 from ripser import ripser, plot_dgms
 import sys
+import warnings
 sys.path.append("DREiMac")
 from CircularCoordinates import CircularCoords
 from DiffusionMaps import *
 from LocalPCA import *
 
-def makeVideo(Y, I, Xs, Ts, pd, colorvar):
+def makeVideo(Y, I, Xs, Ts, pd, colorvar, skip=20):
     c = plt.get_cmap('magma_r')
     C = c(np.array(np.round(255.0*colorvar/np.max(colorvar)), dtype=np.int32))
     C = C[:, 0:3]
     fig = plt.figure(figsize=(12, 6))
     idx = 0
-    for i in range(0, Y.shape[0], 20):
+    for i in range(0, Y.shape[0], skip):
         plt.clf()
         plt.subplot(121)
         plt.imshow(I, interpolation='none', aspect='auto', cmap='RdGy')
@@ -118,7 +120,7 @@ def do_umap_and_tda(pd, sub, nperm, patches, I, Xs, Ts, ts):
     plt.show()
     return Y
 
-def doDiffusionMaps(patches, Xs, Ts, ts):
+def doDiffusionMaps(DSqr, Xs, Ts, ts, dMaxSqrCoeff = 1.0):
     """
     Using https://github.com/jmbr/diffusion-maps
     """
@@ -128,15 +130,13 @@ def doDiffusionMaps(patches, Xs, Ts, ts):
     C2 = c(np.array(np.round(255.0*Xs/np.max(Xs)), dtype=np.int32))
     C2 = C2[:, 0:3]
     
-    D = getSSM(patches)
-    t = 0.4*np.max(D**2)*0.001
+    t = dMaxSqrCoeff*np.max(DSqr)*0.001
     print("t = %g"%t)
-    print("Doing diffusion maps on %i points in %i dimensions..."%(patches.shape[0], patches.shape[1]))
+    print("Doing diffusion maps on %i points"%(DSqr.shape[0]))
     tic = time.time()
-    Y = getDiffusionMap(patches, t, neigs=4, thresh=1e-10)
+    Y = getDiffusionMap(DSqr, t, distance_matrix=True, neigs=6, thresh=1e-10)
     Y = np.fliplr(Y)
     print("Elapsed Time: %.3g"%(time.time()-tic))
-
     Y = Y[:, 1::]
     plt.imshow(Y, aspect='auto')
     plt.show()
@@ -226,60 +226,113 @@ class KSSimulation(object):
         self.pd = pd
         self.f = f
     
-    def getJacobians(self, r, n_points):
+    def getMahalanobisDists(self, delta, n_points, d = -10, maxeig = 10):
         """
+        Compute the Mahalanobis distance between all pairs of points
         To quote from the Singer/Coifman paper:
         "Suppose that we can identify which data points y (j ) belong to the 
                 ellipsoid E y (i) ,δ and which reside outside it"
-        Assume that an "equal space" ellipse is a circle of radius "r"
+        Assume that an "equal space" ellipse is a disc of radius "delta"
         in spacetime (since we are trying to find a map back to spacetime).  
         Sample points uniformly at random within that disc, and
-        use observations centered at those points
+        use observations centered at those points to compute Jacobian.
         Parameters
         ----------
-        r: float
+        delta: float
             Spacetime radius from which to sample
         n_points: int
             Number of points to sample in the disc
+        d: int (default -10)
+            If >0, the dimension of the Jacobian.
+            If <0, then pick the dimension at which the eigengap
+            exceeds |d|
+        maxeig: int (default 10)
+            The maximum number of eigenvectors to compute
+            (should be at least d)
         """
+        if maxeig < d:
+            warnings.warn("maxeig = %i < d = %i"%(maxeig, d))
+        dim = self.patches.shape[1] #The dimension of each patch
+        maxeig = min(maxeig, d)
+        maxeig = min(maxeig, dim)
         ## Step 1: Setup interpolator
         I = self.I
-        I = np.concatenate((I, I, I), 1) #Periodic boundary conditions in space
         x = np.arange(I.shape[1])
         x = x[None, :]*np.ones((3, 1))
         x[0, :] -= I.shape[1]
         x[2, :] += I.shape[1]
+        x = x.flatten()
         t = np.arange(I.shape[0])
-        f_interp = interpolate.interp2d(x, t, I, bounds_error=True)
+        I = np.concatenate((I, I, I), 1) #Periodic boundary conditions in space
+        f_interp = interpolate.RectBivariateSpline(t, x, I)
 
         ## Step 2: For each patch, sample near patches
-        ## and compute Jacobian
+        ## and compute covariance matrix
         pdx, pdt = np.meshgrid(np.arange(self.pd[1]), np.arange(self.pd[0]))
         pdx = pdx.flatten()
         pdt = pdt.flatten()
-        for i in range(self.patches.shape[0]):
+        N = self.patches.shape[0]
+
+        print("Computing Jacobians...")
+        tic = time.time()
+        #"""
+        ws = np.zeros((N, maxeig))
+        vs = np.zeros((N, dim, maxeig))
+        for i in range(N):
+            y = self.patches[i, :]
+            if i%100 == 0:
+                print("%i of %i"%(i, N))
             x0 = self.Xs[i]
             t0 = self.Ts[i]
-            rs = r*np.sqrt(np.random.rand(n_points))
+            rs = delta*np.sqrt(np.random.rand(n_points))
             thetas = np.pi*np.random.rand(n_points)
             xs = x0 + rs*np.cos(thetas) # Left of each patch sample
             ts = t0 + rs*np.sin(thetas) # Top of each patch sample
             xs = xs[:, None] + pdx[None, :]
             ts = ts[:, None] + pdt[None, :]
-            Y = self.f(f_interp(xs.flatten(), ts.flatten()))
-            Y = np.reshape(Y, (n_points, pdx.size))
+            Y = self.f(f_interp(ts.flatten(), xs.flatten(), grid=False))
+            Y = np.reshape(Y, (n_points, pdx.size)) - y[None, :]
+            C = (Y.T).dot(Y)
+            w, v = slinalg.eigh(C, eigvals=(C.shape[1]-maxeig, C.shape[1]-1))
+            # Put largest eigenvectors first
+            w = w[::-1]
+            v = np.fliplr(v)
+            ws[i, :] = w
+            vs[i, :, :] = v
+        sio.savemat("vs.mat", {"vs":vs, "ws":ws})
+        #"""
+        #"""
+        res = sio.loadmat("vs.mat")
+        vs, ws = res["vs"], res["ws"]
+        #"""
+        print("Elapsed Time: %.3g"%(time.time()-tic))
+        if d < 0:
+            # Estimate dimension using eigengaps
+            ratios = np.median(ws[:, 0:-1]/ws[:, 1::], 0)
+            d = np.argmax(np.sign(ratios+d)) + 1
 
-            ## TODO: Finish computing jacobian
-            
+        ## Step 3: Compute squared Mahalanobis distance between
+        ## all pairs of points
+        gamma = np.zeros((N, N))
+        #Create a matrix whose ith row and jth column contains
+        #the dot product of patch i and eigenvector vjk
+        D = np.zeros((N, N, maxeig))
+        for k in range(maxeig):
+            D[:, :, k] = self.patches.dot(vs[:, :, k].T)
+        print("Computing Mahalanobis Distances...")
+        tic = time.time()
+        for k in range(maxeig):
+            Dk = D[:, :, k]
+            Dk_diag = np.diag(Dk)
+            wk = ws[:, k]
+            gamma += (Dk_diag[:, None] - Dk.T)**2/wk[:, None]
+            gamma += (Dk - Dk_diag[None, :])**2/wk[None, :]
+        gamma *= 0.5*(delta**2)/(maxeig+2)
+        print("Elapsed Time: %.3g"%(time.time()-tic))
+        return gamma
 
 
-        
-
-
-
-
-
-def testKS_NLDM(pd = (150, 1), sub=(2, 1), nperm = 600):
+def testKS_NLDM(pd = (150, 1), sub=(2, 1), dMaxSqrCoeff = 1.0, skip=15, nperm = 600):
     """
     Test a nonlinear dimension reduction of the Kuramoto Sivashinsky Equation
     torus attractor
@@ -295,19 +348,29 @@ def testKS_NLDM(pd = (150, 1), sub=(2, 1), nperm = 600):
     ks = KSSimulation()
     ks.makeObservations(pd, sub, -50)
     #Y = do_umap_and_tda(pd, sub, nperm, ks.patches, ks.I, ks.Xs, ks.Ts, ks.ts)
-    Y = doDiffusionMaps(ks.patches, ks.Xs, ks.Ts, ks.ts)
-    makeVideo(Y, ks.I, ks.Xs, ks.Ts, pd, ks.Ts)
+
+    D = np.sum(ks.patches**2, 1)[:, None]
+    DSqr = D + D.T - 2*ks.patches.dot(ks.patches.T)
+    Y = doDiffusionMaps(DSqr, ks.Xs, ks.Ts, ks.ts, dMaxSqrCoeff)
+    makeVideo(Y, ks.I, ks.Xs, ks.Ts, pd, ks.Ts, skip)
 
 
 
 
-
-def testKS_Mahalanobis():
-    res = sio.loadmat("KS.mat")
-    I = res["data"]
-    ts = np.linspace(res["tmin"].flatten(), res["tmax"].flatten(), I.shape[0])
+def testKS_Mahalanobis(pd = (15, 15), sub=(2, 4)):
+    ks = KSSimulation()
+    ks.makeObservations(pd, sub, -50)
+    DSqr = ks.getMahalanobisDists(delta=3, n_points=100, d=2)
+    Y = doDiffusionMaps(DSqr, ks.Xs, ks.Ts, ks.ts, dMaxSqrCoeff = 12.0)
+    sio.savemat("Y.mat", {"Y":Y})
+    perm, lambdas = getGreedyPerm(Y, 600)
+    plt.figure()
+    dgms = ripser(Y[perm, :], maxdim=2)["dgms"]
+    plot_dgms(dgms, show=False)
+    plt.show()
+    makeVideo(Y, ks.I, ks.Xs, ks.Ts, pd, ks.Ts, skip=2)
 
 
 if __name__ == '__main__':
-    testKS_NLDM()
-    #testKS_Mahalanobis()
+    #testKS_NLDM(pd = (50, 15), sub=(1, 4), dMaxSqrCoeff=0.07)
+    testKS_Mahalanobis(pd = (50, 8), sub=(1, 4))

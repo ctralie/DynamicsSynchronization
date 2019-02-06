@@ -5,7 +5,6 @@ from sklearn.decomposition import PCA
 import scipy.io as sio
 from scipy import sparse
 import time
-from mpl_toolkits.mplot3d import Axes3D
 
 def getSSM(X):
     """
@@ -51,8 +50,8 @@ def getDiffusionMap(X, eps, distance_matrix=False, neigs = 4, thresh=5e-4):
     P = np.sum(K, 1)
     P[P == 0] = 1
     KHat = (K/P[:, None])/P[None, :]
-    dRow = np.sum(KHat, 1)
     KHat[KHat < thresh] = 0
+    dRow = np.sum(KHat, 1)
     KHat = sparse.csc_matrix(KHat)
     M = sparse.diags(dRow).tocsc()
     print("Elapsed Time: %.3g"%(time.time()-tic))

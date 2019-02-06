@@ -3,7 +3,6 @@ import scipy.io as sio
 import scipy.linalg as slinalg
 import matplotlib.pyplot as plt
 import sklearn.feature_extraction.image as skimage
-from sklearn import manifold
 import umap
 import time
 from scipy import interpolate
@@ -120,10 +119,7 @@ def do_umap_and_tda(pd, sub, nperm, patches, I, Xs, Ts, ts):
     plt.show()
     return Y
 
-def doDiffusionMaps(DSqr, Xs, Ts, ts, dMaxSqrCoeff = 1.0):
-    """
-    Using https://github.com/jmbr/diffusion-maps
-    """
+def doDiffusionMaps(DSqr, Xs, Ts, ts, dMaxSqrCoeff = 1.0, do_plot = True):
     c = plt.get_cmap('magma_r')
     C1 = c(np.array(np.round(255.0*ts[Ts]/np.max(ts[Ts])), dtype=np.int32))
     C1 = C1[:, 0:3]
@@ -138,21 +134,11 @@ def doDiffusionMaps(DSqr, Xs, Ts, ts, dMaxSqrCoeff = 1.0):
     Y = np.fliplr(Y)
     print("Elapsed Time: %.3g"%(time.time()-tic))
     Y = Y[:, 1::]
-    plt.imshow(Y, aspect='auto')
-    plt.show()
 
-    plt.figure(figsize=(6, 6))
-    """
-    ax = plt.gcf().add_subplot(121, projection='3d')
-    ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=C1)
-    plt.title("Diffusion Maps By Time")
-    """
-
-    ax = plt.gcf().add_subplot(111, projection='3d')
-    ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=C2)
-    plt.title("Diffusion Maps By Space")
-    plt.show()
-
+    if do_plot:
+        ax = plt.gcf().add_subplot(111, projection='3d')
+        ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=C2)
+        plt.title("Diffusion Maps By Space")
     return Y
 
 
@@ -193,7 +179,7 @@ class KSSimulation(object):
         self.I = I
         self.ts = np.linspace(res["tmin"].flatten(), res["tmax"].flatten(), I.shape[0])
     
-    def makeObservations(self, pd, sub, tidx_max, f = lambda x: x):
+    def makeObservations(self, pd, sub, tidx_max = None, f = lambda x: x):
         """
         Create an observation 
         Parameters
@@ -202,12 +188,14 @@ class KSSimulation(object):
             The dimensions of each patch (height, width)
         sub: tuple(int, int)
             The factor by which to subsample the patches across each dimension
-        f: function ndarray->ndarray
-            A pointwise homeomorphism to apply to pixels in the observation function
         tidx_max: int
             Maximum time index to include in any observation window
+        f: function ndarray->ndarray
+            A pointwise homeomorphism to apply to pixels in the observation function
         """
-        I = self.I[0:tidx_max, :]
+        I = self.I
+        if tidx_max:
+            I = I[0:tidx_max, :]
         I = np.concatenate((I, I[:, 0:pd[1]]), 1) # Do periodic padding
         M, N = I.shape[0], I.shape[1]
         patches = skimage.extract_patches_2d(I, pd)
@@ -285,13 +273,13 @@ class KSSimulation(object):
             x0 = self.Xs[i]
             t0 = self.Ts[i]
             rs = delta*np.sqrt(np.random.rand(n_points))
-            thetas = np.pi*np.random.rand(n_points)
+            thetas = 2*np.pi*np.random.rand(n_points)
             xs = x0 + rs*np.cos(thetas) # Left of each patch sample
             ts = t0 + rs*np.sin(thetas) # Top of each patch sample
             xs = xs[:, None] + pdx[None, :]
             ts = ts[:, None] + pdt[None, :]
             Y = self.f(f_interp(ts.flatten(), xs.flatten(), grid=False))
-            Y = np.reshape(Y, (n_points, pdx.size)) - y[None, :]
+            Y = np.reshape(Y, (n_points, pdx.size)) - y[None, :] # Center samples
             C = (Y.T).dot(Y)
             w, v = slinalg.eigh(C, eigvals=(C.shape[1]-maxeig, C.shape[1]-1))
             # Put largest eigenvectors first
@@ -332,7 +320,7 @@ class KSSimulation(object):
         return gamma
 
 
-def testKS_NLDM(pd = (150, 1), sub=(2, 1), dMaxSqrCoeff = 1.0, skip=15, nperm = 600):
+def testKS_NLDM(pd = (150, 1), sub=(1, 1), dMaxSqrCoeff = 1.0, skip=15, nperm = 600):
     """
     Test a nonlinear dimension reduction of the Kuramoto Sivashinsky Equation
     torus attractor
@@ -346,13 +334,14 @@ def testKS_NLDM(pd = (150, 1), sub=(2, 1), dMaxSqrCoeff = 1.0, skip=15, nperm = 
         Number of points to take in a greedy permutation
     """
     ks = KSSimulation()
-    ks.makeObservations(pd, sub, -50)
+    ks.makeObservations(pd, sub)
     #Y = do_umap_and_tda(pd, sub, nperm, ks.patches, ks.I, ks.Xs, ks.Ts, ks.ts)
 
     D = np.sum(ks.patches**2, 1)[:, None]
     DSqr = D + D.T - 2*ks.patches.dot(ks.patches.T)
     Y = doDiffusionMaps(DSqr, ks.Xs, ks.Ts, ks.ts, dMaxSqrCoeff)
-    makeVideo(Y, ks.I, ks.Xs, ks.Ts, pd, ks.Ts, skip)
+    plt.show()
+    #makeVideo(Y, ks.I, ks.Xs, ks.Ts, pd, ks.Ts, skip)
 
 
 
@@ -361,16 +350,32 @@ def testKS_Mahalanobis(pd = (15, 15), sub=(2, 4)):
     ks = KSSimulation()
     ks.makeObservations(pd, sub, -50)
     DSqr = ks.getMahalanobisDists(delta=3, n_points=100, d=2)
-    Y = doDiffusionMaps(DSqr, ks.Xs, ks.Ts, ks.ts, dMaxSqrCoeff = 12.0)
+    Y = doDiffusionMaps(DSqr, ks.Xs, ks.Ts, ks.ts, dMaxSqrCoeff = 10.0)
     sio.savemat("Y.mat", {"Y":Y})
     perm, lambdas = getGreedyPerm(Y, 600)
     plt.figure()
     dgms = ripser(Y[perm, :], maxdim=2)["dgms"]
     plot_dgms(dgms, show=False)
     plt.show()
-    makeVideo(Y, ks.I, ks.Xs, ks.Ts, pd, ks.Ts, skip=2)
+    makeVideo(Y, ks.I, ks.Xs, ks.Ts, pd, ks.Ts, skip=15)
 
+
+def testKS_Variations():
+    """
+    Vary window lengths and diffusion parameters
+    """
+    ks = KSSimulation()
+    for pd in [(200, 1), (150, 1), (50, 50), (1, 150), (40, 40)]:
+        ks.makeObservations(pd, (2, 2))
+        D = np.sum(ks.patches**2, 1)[:, None]
+        DSqr = D + D.T - 2*ks.patches.dot(ks.patches.T)
+        for dMaxSqrCoeff in [0.3, 0.4, 0.5, 1.0]:
+            plt.clf()
+            Y = doDiffusionMaps(DSqr, ks.Xs, ks.Ts, ks.ts, dMaxSqrCoeff, True)
+            plt.title("%i x %i Patches, $\\epsilon=%.3g \\max(D^2) 10^{-3}$"%(pd[0], pd[1], dMaxSqrCoeff))
+            plt.savefig("%i_%i_%.3g.png"%(pd[0], pd[1], dMaxSqrCoeff))
 
 if __name__ == '__main__':
-    #testKS_NLDM(pd = (50, 15), sub=(1, 4), dMaxSqrCoeff=0.07)
-    testKS_Mahalanobis(pd = (50, 8), sub=(1, 4))
+    #testKS_NLDM(pd = (200, 1), sub=(2, 1), dMaxSqrCoeff=0.4)
+    #testKS_Mahalanobis(pd = (50, 15), sub=(1, 4))
+    testKS_Variations()

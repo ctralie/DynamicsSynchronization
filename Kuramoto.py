@@ -8,6 +8,8 @@ import time
 from scipy import interpolate
 from mpl_toolkits.mplot3d import Axes3D
 from ripser import ripser, plot_dgms
+import torch
+from kymatio import Scattering2D
 import sys
 import warnings
 sys.path.append("DREiMac")
@@ -196,6 +198,23 @@ class KSSimulation(object):
         else:
             plt.imshow(self.I, interpolation='none', aspect='auto', cmap='RdGy')
 
+    def getInterpolator(self, periodic = True):
+        """
+        Create a 2D rect bivariate spline interpolator to sample
+        from the solution set with interpolation
+        """
+        ## Step 1: Setup interpolator
+        I = self.I
+        x = np.arange(I.shape[1])
+        t = np.arange(I.shape[0])
+        if periodic:
+            x = x[None, :]*np.ones((3, 1))
+            x[0, :] -= I.shape[1]
+            x[2, :] += I.shape[1]
+            x = x.flatten()
+            I = np.concatenate((I, I, I), 1) #Periodic boundary conditions in space
+        return interpolate.RectBivariateSpline(t, x, I)
+
     def makeObservationsGrid(self, pd, sub, tidx_max = None, f = lambda x: x):
         """
         Make observations without rotation on a regular grid  
@@ -235,33 +254,20 @@ class KSSimulation(object):
         self.patches = np.reshape(patches, (patches.shape[0]*patches.shape[1], pd[0]*pd[1]))
         self.pd = pd
         self.f = f
-    
-    def getInterpolator(self, periodic = True):
-        """
-        Create a 2D rect bivariate spline interpolator to sample
-        from the solution set with interpolation
-        """
-        ## Step 1: Setup interpolator
-        I = self.I
-        x = np.arange(I.shape[1])
-        t = np.arange(I.shape[0])
-        if periodic:
-            x = x[None, :]*np.ones((3, 1))
-            x[0, :] -= I.shape[1]
-            x[2, :] += I.shape[1]
-            x = x.flatten()
-            I = np.concatenate((I, I, I), 1) #Periodic boundary conditions in space
-        return interpolate.RectBivariateSpline(t, x, I)
 
-    def makeObservationsRotated(self, pd, N, f = lambda x: x):
+    def makeObservationsRandom(self, pd, N, uniform=True, rotate = False, f = lambda x: x):
         """
-        Make observations with rotation on a regular grid  
+        Make random rectangular observations (possibly with rotation)
         Parameters
         ----------
         pd: tuple(int, int)
             The dimensions of each patch (height, width)
         N: int
             The number of patches to sample
+        uniform: boolean
+            Whether to sample the centers uniformly spatially
+        rotate: boolean
+            Whether to randomly rotate the patches
         f: function ndarray->ndarray
             A pointwise homeomorphism to apply to pixels in the observation function
         """
@@ -272,9 +278,19 @@ class KSSimulation(object):
         self.pd = pd
         self.f = f
         # Pick center coordinates of each patch and rotation angle
-        self.Ts = r+np.random.rand(N)*(self.I.shape[0]-2*r)
-        self.Xs = np.random.rand(N)*self.I.shape[1]
-        self.thetas = np.random.rand(N)*2*np.pi
+        if uniform:
+            Y = np.random.rand(N*20, 2)
+            perm, labmdas = getGreedyPerm(Y, N)
+            Y = Y[perm, :]
+            self.Ts = r + Y[:, 0]*(self.I.shape[0]-2*r)
+            self.Xs = Y[:, 1]*self.I.shape[1]
+        else:
+            self.Ts = r+np.random.rand(N)*(self.I.shape[0]-2*r)
+            self.Xs = np.random.rand(N)*self.I.shape[1]
+        if rotate:
+            self.thetas = np.random.rand(N)*2*np.pi
+        else:
+            self.thetas = np.zeros_like(self.Xs)
 
         # Now sample all patches
         pdx, pdt = np.meshgrid(even_interval(pd[1]), -even_interval(pd[0]))
@@ -488,23 +504,28 @@ def testKS_Variations():
     Vary window lengths and diffusion parameters
     """
     ks = KSSimulation()
-    for pd in [(200, 1), (150, 1), (50, 50), (1, 150), (40, 40)]:
-        ks.makeObservationsGrid(pd, (2, 2))
-        D = np.sum(ks.patches**2, 1)[:, None]
-        DSqr = D + D.T - 2*ks.patches.dot(ks.patches.T)
-        for dMaxSqrCoeff in [0.3, 0.4, 0.5, 1.0]:
-            plt.clf()
-            Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqrCoeff, True)
-            plt.title("%i x %i Patches, $\\epsilon=%.3g \\max(D^2) 10^{-3}$"%(pd[0], pd[1], dMaxSqrCoeff))
-            plt.savefig("%i_%i_%.3g.png"%(pd[0], pd[1], dMaxSqrCoeff))
+    for N in [5000, 10000, 15000]:
+        for pd in [(150, 1)]:#[(200, 1), (150, 1), (50, 50), (1, 150), (40, 40)]:
+            #ks.makeObservationsGrid(pd, (2, 2))
+            ks.makeObservationsRandom(pd, N)
+            D = np.sum(ks.patches**2, 1)[:, None]
+            DSqr = D + D.T - 2*ks.patches.dot(ks.patches.T)
+            for dMaxSqrCoeff in np.array([0.3, 0.4, 0.5, 1.0]):
+                plt.clf()
+                Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqrCoeff, True)
+                plt.title("%i x %i Patches, $\\epsilon=%.3g \\max(D^2) 10^{-3}$"%(pd[0], pd[1], dMaxSqrCoeff))
+                plt.savefig("%i_%i_%.3g_%i.png"%(pd[0], pd[1], dMaxSqrCoeff, N))
 
-if __name__ == '__main__':
-    #testKS_NLDM(pd = (200, 1), sub=(2, 1), dMaxSqrCoeff=0.4)
-    #testKS_Mahalanobis(pd = (50, 15), sub=(1, 4))
-    #testKS_Variations()
+def testKS_Rotations():
     ks = KSSimulation()
-    ks.makeObservationsRotated((80, 40), 200)
+    ks.makeObservationsRandom((80, 40), N=20, rotate=True)
     
     ks.plotPatches(False)
     plt.show()
     ks.plotPatches()
+
+if __name__ == '__main__':
+    #testKS_NLDM(pd = (200, 1), sub=(2, 1), dMaxSqrCoeff=0.4)
+    #testKS_Mahalanobis(pd = (50, 15), sub=(1, 4))
+    testKS_Variations()
+    #testKS_Rotations()

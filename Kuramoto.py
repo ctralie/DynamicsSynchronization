@@ -17,43 +17,6 @@ from CircularCoordinates import CircularCoords
 from DiffusionMaps import *
 from LocalPCA import *
 
-def makeVideo(Y, I, Xs, Ts, pd, colorvar, skip=20):
-    c = plt.get_cmap('magma_r')
-    C = c(np.array(np.round(255.0*colorvar/np.max(colorvar)), dtype=np.int32))
-    C = C[:, 0:3]
-    fig = plt.figure(figsize=(12, 6))
-    idx = 0
-    for i in range(0, Y.shape[0], skip):
-        plt.clf()
-        plt.subplot(121)
-        plt.imshow(I, interpolation='none', aspect='auto', cmap='RdGy')
-        x1, x2 = Xs[i], Xs[i]+pd[1]
-        y1, y2 = Ts[i], Ts[i]+pd[0]
-        plt.plot([x1, x1, x2, x2, x1], [y1, y2, y2, y1, y1], 'r')
-        plt.xlabel("Space")
-        plt.ylabel("Time")
-        plt.title("[%i, %i] x [%i, %i]"%(x1, x2, y1, y2))
-        plt.xlim([0, I.shape[1]])
-        plt.ylim([I.shape[0], 0])
-
-        if Y.shape[1] == 3:
-            ax = plt.gcf().add_subplot(122, projection='3d')
-            ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=np.array([[0, 0, 0, 0]]))
-            ax.scatter(Y[0:i+1, 0], Y[0:i+1, 1], Y[0:i+1, 2], c=C[0:i+1, :])
-            ax.scatter(Y[i, 0], Y[i, 1], Y[i, 2], 'r')
-        else:
-            plt.subplot(122)
-            plt.scatter(Y[:, 0], Y[:, 1], 100, c=np.array([[0, 0, 0, 0]]))
-            plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C[0:i+1, :])
-            plt.scatter(Y[i, 0], Y[i, 1], 40, 'r')
-            plt.axis('equal')
-            ax = plt.gca()
-            ax.set_facecolor((0.15, 0.15, 0.15))
-            ax.set_xticks([])
-            ax.set_yticks([])
-        plt.savefig("%i.png"%idx)
-        idx += 1
-
 def do_umap_and_tda(pd, sub, nperm, patches, I, Xs, Ts, ts):
     ## Step 1: Do Umap
     n_components = 2
@@ -130,7 +93,7 @@ def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True):
     print("t = %g"%t)
     print("Doing diffusion maps on %i points"%(DSqr.shape[0]))
     tic = time.time()
-    Y = getDiffusionMap(DSqr, t, distance_matrix=True, neigs=6, thresh=1e-10)
+    Y = getDiffusionMap(DSqr, t, distance_matrix=True, neigs=4, thresh=1e-10)
     Y = np.fliplr(Y)
     print("Elapsed Time: %.3g"%(time.time()-tic))
     Y = Y[:, 1::]
@@ -215,7 +178,7 @@ class KSSimulation(object):
             I = np.concatenate((I, I, I), 1) #Periodic boundary conditions in space
         return interpolate.RectBivariateSpline(t, x, I)
 
-    def makeObservationsGrid(self, pd, sub, tidx_max = None, f = lambda x: x):
+    def makeObservationsIntegerGrid(self, pd, sub, tidx_max = None, f = lambda x: x):
         """
         Make observations without rotation on a regular grid  
         Parameters
@@ -255,15 +218,16 @@ class KSSimulation(object):
         self.pd = pd
         self.f = f
 
-    def makeObservationsRandom(self, pd, N, uniform=True, rotate = False, f = lambda x: x):
+    def makeObservations(self, pd, nsamples, uniform=True, rotate = False, f = lambda x: x):
         """
         Make random rectangular observations (possibly with rotation)
         Parameters
         ----------
         pd: tuple(int, int)
             The dimensions of each patch (height, width)
-        N: int
-            The number of patches to sample
+        nsamples: tuple(int, int)
+            The number of patches to sample, or the dimension of the 
+            uniform grid from which to sample patches
         uniform: boolean
             Whether to sample the centers uniformly spatially
         rotate: boolean
@@ -274,21 +238,32 @@ class KSSimulation(object):
         f_interp = self.getInterpolator(periodic=True)
         # Make sure a rotated patch is within the time range
         # (we usually don't have to worry about )
-        r = np.sqrt((pd[0]/2)**2 + (pd[1]/2)**2)
+        if rotate:
+            r = np.sqrt((pd[0]/2)**2 + (pd[1]/2)**2)
+        else:
+            r = pd[0]/2.0
         self.pd = pd
         self.f = f
-        # Pick center coordinates of each patch and rotation angle
-        if uniform:
-            Y = np.random.rand(N*20, 2)
-            perm, labmdas = getGreedyPerm(Y, N)
-            Y = Y[perm, :]
-            self.Ts = r + Y[:, 0]*(self.I.shape[0]-2*r)
-            self.Xs = Y[:, 1]*self.I.shape[1]
+        if isinstance(nsamples, tuple):
+            M, N = nsamples
+            x = np.linspace(0, self.I.shape[1], N)
+            t = np.linspace(r, self.I.shape[0]-r, M)
+            x, t = np.meshgrid(x, t)
+            self.Ts = t.flatten()
+            self.Xs = x.flatten()
         else:
-            self.Ts = r+np.random.rand(N)*(self.I.shape[0]-2*r)
-            self.Xs = np.random.rand(N)*self.I.shape[1]
+            # Pick center coordinates of each patch and rotation angle
+            if uniform:
+                Y = np.random.rand(N*20, 2)
+                perm, labmdas = getGreedyPerm(Y, N)
+                Y = Y[perm, :]
+                self.Ts = r + Y[:, 0]*(self.I.shape[0]-2*r)
+                self.Xs = Y[:, 1]*self.I.shape[1]
+            else:
+                self.Ts = r+np.random.rand(N)*(self.I.shape[0]-2*r)
+                self.Xs = np.random.rand(N)*self.I.shape[1]
         if rotate:
-            self.thetas = np.random.rand(N)*2*np.pi
+            self.thetas = np.random.rand(self.Xs.size)*2*np.pi
         else:
             self.thetas = np.zeros_like(self.Xs)
 
@@ -296,8 +271,8 @@ class KSSimulation(object):
         pdx, pdt = np.meshgrid(even_interval(pd[1]), -even_interval(pd[0]))
         pdx = pdx.flatten()
         pdt = pdt.flatten()
-        ts = np.zeros((N, pdt.size))
-        xs = np.zeros((N, pdx.size))
+        ts = np.zeros((self.Xs.size, pdt.size))
+        xs = np.zeros((self.Xs.size, pdx.size))
         # Setup all coordinate locations to sample
         for i, (theta, tc, xc) in enumerate(zip(self.thetas, self.Ts, self.Xs)):
             c, s = np.cos(theta), np.sin(theta)
@@ -307,61 +282,9 @@ class KSSimulation(object):
         # Use interpolator to sample coordinates for all patches
         patches = f(f_interp(ts.flatten(), xs.flatten(), grid=False))
         self.patches = np.reshape(patches, ts.shape)
-    
-    def plotPatchBoundary(self, i):
-        """
-        Plot a rectangular outline of the ith patch
-        along with arrows at its center indicating
-        the principal axes
-        Parameters
-        ----------
-        i: int
-            Index of patch
-        """
-        pdx = even_interval(self.pd[1])
-        pdt = even_interval(self.pd[0])
-        x0, x1 = pdx[0], pdx[-1]
-        t0, t1 = pdt[0], pdt[-1]
-        x = np.array([[x0, t0], [x0, t1], [x1, t1], [x1, t0], [x0, t0]])
-        c, s = np.cos(self.thetas[i]), np.sin(self.thetas[i])
-        R = np.array([[c, -s], [s, c]])
-        xc = self.Xs[i]
-        tc = self.Ts[i]
-        x = (R.dot(x.T)).T + np.array([[xc, tc]])
-        plt.plot(x[:, 0], x[:, 1], 'C0')
-        ax = plt.gca()
-        R[:, 0] *= self.pd[1]/2
-        R[:, 1] *= self.pd[0]/2
-        ax.arrow(xc, tc, R[0, 0], R[1, 0], head_width = 5, head_length = 3, fc = 'c', ec = 'c', width = 1)
-        ax.arrow(xc, tc, R[0, 1], R[1, 1], head_width = 5, head_length = 3, fc = 'g', ec = 'g', width = 1)
 
-    def plotPatches(self, save_frames = True):
-        """
-        Make a video of the patches
-        """
-        print(np.min(self.Ts))
-        if save_frames:
-            plt.figure(figsize=(12, 6))
-        else:
-            self.drawSolutionImage()
-        for i in range(self.patches.shape[0]):
-            if save_frames:
-                plt.clf()
-                plt.subplot(121)
-                self.drawSolutionImage()
-            self.plotPatchBoundary(i)
-            if save_frames or i == self.patches.shape[0]-1:
-                plt.axis('equal')
-                plt.xlim(0, self.I.shape[1])
-                plt.ylim(self.I.shape[0], 0)
-            if save_frames:
-                plt.subplot(122)
-                p = np.reshape(self.patches[i, :], self.pd)
-                plt.imshow(p, interpolation='none', cmap='RdGy', vmin=np.min(self.I), vmax=np.max(self.I))
-                plt.savefig("%i.png"%i, bbox_inches='tight')
 
     def getMahalanobisDists(self, delta, n_points, d = -10, maxeig = 10):
-        ## TODO: Update this to deal with rotated patches
         """
         Compute the Mahalanobis distance between all pairs of points
         To quote from the Singer/Coifman paper:
@@ -459,7 +382,106 @@ class KSSimulation(object):
         return gamma
 
 
-def testKS_NLDM(pd = (150, 1), sub=(1, 1), dMaxSqrCoeff = 1.0, skip=15, nperm = 600):
+    
+    def plotPatchBoundary(self, i, draw_arrows=True):
+        """
+        Plot a rectangular outline of the ith patch
+        along with arrows at its center indicating
+        the principal axes
+        Parameters
+        ----------
+        i: int
+            Index of patch
+        """
+        pdx = even_interval(self.pd[1])
+        pdt = even_interval(self.pd[0])
+        x0, x1 = pdx[0], pdx[-1]
+        t0, t1 = pdt[0], pdt[-1]
+        x = np.array([[x0, t0], [x0, t1], [x1, t1], [x1, t0], [x0, t0]])
+        c, s = np.cos(self.thetas[i]), np.sin(self.thetas[i])
+        R = np.array([[c, -s], [s, c]])
+        xc = self.Xs[i]
+        tc = self.Ts[i]
+        x = (R.dot(x.T)).T + np.array([[xc, tc]])
+        plt.plot(x[:, 0], x[:, 1], 'C0')
+        ax = plt.gca()
+        R[:, 0] *= self.pd[1]/2
+        R[:, 1] *= self.pd[0]/2
+        if draw_arrows:
+            ax.arrow(xc, tc, R[0, 0], R[1, 0], head_width = 5, head_length = 3, fc = 'c', ec = 'c', width = 1)
+            ax.arrow(xc, tc, R[0, 1], R[1, 1], head_width = 5, head_length = 3, fc = 'g', ec = 'g', width = 1)
+
+    def plotPatches(self, save_frames = True):
+        """
+        Make a video of the patches
+        """
+        print(np.min(self.Ts))
+        if save_frames:
+            plt.figure(figsize=(12, 6))
+        else:
+            self.drawSolutionImage()
+        for i in range(self.patches.shape[0]):
+            if save_frames:
+                plt.clf()
+                plt.subplot(121)
+                self.drawSolutionImage()
+            self.plotPatchBoundary(i)
+            if save_frames or i == self.patches.shape[0]-1:
+                plt.axis('equal')
+                plt.xlim(0, self.I.shape[1])
+                plt.ylim(self.I.shape[0], 0)
+            if save_frames:
+                plt.subplot(122)
+                p = np.reshape(self.patches[i, :], self.pd)
+                plt.imshow(p, interpolation='none', cmap='RdGy', vmin=np.min(self.I), vmax=np.max(self.I))
+                plt.savefig("%i.png"%i, bbox_inches='tight')
+
+    def makeVideo(self, Y, skip=20):
+        """
+        Make a video given a nonlinear dimension reduction, which
+        is assumed to be parallel to the patches
+        """
+        colorvar = self.Xs
+        c = plt.get_cmap('magma_r')
+        C = c(np.array(np.round(255.0*colorvar/np.max(colorvar)), dtype=np.int32))
+        C = C[:, 0:3]
+        fig = plt.figure(figsize=(12, 6))
+        I, Xs, Ts = self.I, self.Xs, self.Ts
+
+        idx = 0
+        for i in range(0, Y.shape[0], skip):
+            plt.clf()
+            plt.subplot(121)
+            plt.imshow(I, interpolation='none', aspect='auto', cmap='RdGy')
+            self.plotPatchBoundary(i)
+            plt.xlabel("Space")
+            plt.ylabel("Time")
+            plt.xlim([0, I.shape[1]])
+            plt.ylim([I.shape[0], 0])
+
+            if Y.shape[1] == 3:
+                ax = plt.gcf().add_subplot(122, projection='3d')
+                ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=np.array([[0, 0, 0, 0]]))
+                ax.scatter(Y[0:i+1, 0], Y[0:i+1, 1], Y[0:i+1, 2], c=C[0:i+1, :])
+                ax.scatter(Y[i, 0], Y[i, 1], Y[i, 2], 'r')
+            else:
+                plt.subplot(122)
+                plt.scatter(Y[:, 0], Y[:, 1], 100, c=np.array([[0, 0, 0, 0]]))
+                plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C[0:i+1, :])
+                plt.scatter(Y[i, 0], Y[i, 1], 40, 'r')
+                plt.axis('equal')
+                ax = plt.gca()
+                ax.set_facecolor((0.15, 0.15, 0.15))
+                ax.set_xticks([])
+                ax.set_yticks([])
+            plt.savefig("%i.png"%idx)
+            idx += 1
+
+
+
+
+
+def testKS_NLDM(pd = (150, 1), nsamples=1000, dMaxSqrCoeff = 1.0, skip=15, nperm = 600):
     """
     Test a nonlinear dimension reduction of the Kuramoto Sivashinsky Equation
     torus attractor
@@ -467,27 +489,29 @@ def testKS_NLDM(pd = (150, 1), sub=(1, 1), dMaxSqrCoeff = 1.0, skip=15, nperm = 
     ----------
     pd: tuple(int, int)
         The dimensions of each patch
-    sub: int
-        The factor by which to subsample the patches
+    nsamples: int or tuple(int, int)
+        The number of patches to sample, or the dimension of the 
+        uniform grid from which to sample patches
     nperm: int
         Number of points to take in a greedy permutation
     """
     ks = KSSimulation()
-    ks.makeObservationsGrid(pd, sub)
-    #Y = do_umap_and_tda(pd, sub, nperm, ks.patches, ks.I, ks.Xs, ks.Ts, ks.ts)
+    ks.makeObservations(pd, nsamples, rotate=False)
+    #ks.makeObservationsIntegerGrid(pd, (2, 2))
+    #print("%i x %i patch grid"%(len(np.unique(ks.Ts)), len(np.unique(ks.Xs))))
 
     D = np.sum(ks.patches**2, 1)[:, None]
     DSqr = D + D.T - 2*ks.patches.dot(ks.patches.T)
+    print(np.max(DSqr))
     Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqrCoeff)
     plt.show()
-    #makeVideo(Y, ks.I, ks.Xs, ks.Ts, pd, ks.Ts, skip)
+    ks.makeVideo(Y[:, 0:2], skip)
 
 
 
-
-def testKS_Mahalanobis(pd = (15, 15), sub=(2, 4)):
+def testKS_Mahalanobis(pd = (15, 15), NSamples = 10000):
     ks = KSSimulation()
-    ks.makeObservationsGrid(pd, sub, -50)
+    ks.makeObservations(pd, NSamples)
     DSqr = ks.getMahalanobisDists(delta=3, n_points=100, d=2)
     Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqrCoeff = 10.0)
     sio.savemat("Y.mat", {"Y":Y})
@@ -496,7 +520,7 @@ def testKS_Mahalanobis(pd = (15, 15), sub=(2, 4)):
     dgms = ripser(Y[perm, :], maxdim=2)["dgms"]
     plot_dgms(dgms, show=False)
     plt.show()
-    makeVideo(Y, ks.I, ks.Xs, ks.Ts, pd, ks.Ts, skip=15)
+    ks.makeVideo(Y[:, 0:2], skip=15)
 
 
 def testKS_Variations():
@@ -506,26 +530,27 @@ def testKS_Variations():
     ks = KSSimulation()
     for N in [5000, 10000, 15000]:
         for pd in [(150, 1)]:#[(200, 1), (150, 1), (50, 50), (1, 150), (40, 40)]:
-            #ks.makeObservationsGrid(pd, (2, 2))
-            ks.makeObservationsRandom(pd, N)
+            #ks.makeObservationsIntegerGrid(pd, (2, 2))
+            ks.makeObservations(pd, N)
             D = np.sum(ks.patches**2, 1)[:, None]
             DSqr = D + D.T - 2*ks.patches.dot(ks.patches.T)
-            for dMaxSqrCoeff in np.array([0.3, 0.4, 0.5, 1.0]):
+            for dMaxSqrCoeff in [0.5]:#np.array([0.3, 0.4, 0.5, 1.0]):
                 plt.clf()
                 Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqrCoeff, True)
                 plt.title("%i x %i Patches, $\\epsilon=%.3g \\max(D^2) 10^{-3}$"%(pd[0], pd[1], dMaxSqrCoeff))
                 plt.savefig("%i_%i_%.3g_%i.png"%(pd[0], pd[1], dMaxSqrCoeff, N))
+                ks.makeVideo(Y, skip=20)
 
 def testKS_Rotations():
     ks = KSSimulation()
-    ks.makeObservationsRandom((80, 40), N=20, rotate=True)
+    ks.makeObservations((80, 40), (20, 20), rotate=False)
     
     ks.plotPatches(False)
     plt.show()
     ks.plotPatches()
 
 if __name__ == '__main__':
-    #testKS_NLDM(pd = (200, 1), sub=(2, 1), dMaxSqrCoeff=0.4)
+    testKS_NLDM(pd = (64, 64), nsamples=(94, 201), dMaxSqrCoeff=0.4)
     #testKS_Mahalanobis(pd = (50, 15), sub=(1, 4))
-    testKS_Variations()
+    #testKS_Variations()
     #testKS_Rotations()

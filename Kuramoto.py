@@ -3,7 +3,6 @@ import scipy.io as sio
 import scipy.linalg as slinalg
 import matplotlib.pyplot as plt
 import sklearn.feature_extraction.image as skimage
-import umap
 import time
 from scipy import interpolate
 from mpl_toolkits.mplot3d import Axes3D
@@ -16,73 +15,7 @@ sys.path.append("DREiMac")
 from CircularCoordinates import CircularCoords
 from DiffusionMaps import *
 from LocalPCA import *
-
-def do_umap_and_tda(pd, sub, nperm, patches, I, Xs, Ts, ts):
-    ## Step 1: Do Umap
-    n_components = 2
-    n_neighbors = 4
-    Y = umap.UMAP(n_components=n_components, n_neighbors=n_neighbors).fit_transform(patches)
-
-
-    print(patches.shape)
-    res1 = CircularCoords(patches, nperm, cocycle_idx = [0])
-    #res2 = CircularCoords(patches, nperm, cocycle_idx = [1])
-    perm = res1["perm"]
-    dgms = ripser(patches[perm, :], maxdim=1, coeff=41)["dgms"]
-    dgms1 = dgms[1]
-
-
-    plt.figure(figsize=(12, 12))
-    plt.subplot(221)
-    plt.imshow(I, interpolation='none', aspect='auto', cmap='RdGy', extent=(0, I.shape[1], ts[-1], ts[0]))
-    x1, x2 = Xs[5], Xs[5]+pd[1]
-    y1, y2 = ts[Ts[5]], ts[Ts[5]+pd[0]]
-    plt.plot([x1, x1, x2, x2, x1], [y1, y2, y2, y1, y1], 'r')
-    plt.xlabel("Space")
-    plt.ylabel("Time")
-    plt.title("Solution")
-
-    plt.subplot(223)
-    plt.scatter(Y[:, 0], Y[:, 1], 20, c=ts[Ts], cmap='magma_r')
-    plt.colorbar()
-    plt.axis('equal')
-    plt.title("Umap By Time")
-
-
-    plt.subplot(224)
-    plt.scatter(Y[:, 0], Y[:, 1], 20, c=Xs, cmap='magma_r')
-    plt.colorbar()
-    plt.axis('equal')
-    plt.title("Umap By Space")
-
-    plt.subplot(222)
-    plot_dgms(dgms)
-    idx = np.argsort(dgms1[:, 0]-dgms1[:, 1])
-    plt.text(dgms1[idx[0], 0], dgms1[idx[0], 1], "1")
-    plt.text(dgms1[idx[1], 0], dgms1[idx[1], 1], "2")
-    plt.title("Persistence Diagrams")
-
-    """
-    plt.subplot(235)
-    plt.scatter(Xs, ts[Ts], 40, res1["thetas"], cmap="magma_r")
-    plt.gca().invert_yaxis()
-    plt.xlabel("Space")
-    plt.ylabel("Time")
-    plt.xlim([0, I.shape[1]])
-    plt.ylim([ts[-1], ts[0]])
-    plt.title("Cocycle 1")
-
-    plt.subplot(236)
-    plt.scatter(Xs, ts[Ts], 40, res2["thetas"], cmap="magma_r")
-    plt.gca().invert_yaxis()
-    plt.xlabel("Space")
-    plt.ylabel("Time")
-    plt.xlim([0, I.shape[1]])
-    plt.ylim([ts[-1], ts[0]])
-    plt.title("Cocycle 2")
-    """
-    plt.show()
-    return Y
+from PatchDescriptors import *
 
 def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True):
     c = plt.get_cmap('magma_r')
@@ -103,15 +36,6 @@ def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True):
         ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=C2)
         plt.title("Diffusion Maps By Space")
     return Y
-
-
-
-
-
-
-
-
-
 
 
 def even_interval(k):
@@ -178,7 +102,8 @@ class KSSimulation(object):
             I = np.concatenate((I, I, I), 1) #Periodic boundary conditions in space
         return interpolate.RectBivariateSpline(t, x, I)
 
-    def makeObservationsIntegerGrid(self, pd, sub, tidx_max = None, f = lambda x: x):
+    def makeObservationsIntegerGrid(self, pd, sub, tidx_max = None, \
+                                    f_pointwise = lambda x: x, f_patch = lambda x: x):
         """
         Make observations without rotation on a regular grid  
         Parameters
@@ -189,9 +114,12 @@ class KSSimulation(object):
             The factor by which to subsample the patches across each dimension
         tidx_max: int
             Maximum time index to include in any observation window
-        f: function ndarray->ndarray
+        f_pointwise: function ndarray->ndarray
             A pointwise homeomorphism to apply to pixels in the observation function
+        f_patch: funtion: ndarray(n_patches, n_pixels) -> ndarray(n_patches, n_features)
+            A function to apply to all patches
         """
+        print("Making observations on integer grid, pd = %s, sub = %s..."%(pd, sub))
         I = self.I
         if tidx_max:
             I = I[0:tidx_max, :]
@@ -207,6 +135,7 @@ class KSSimulation(object):
         Ts += float(pd[0])/2.0
         # Subsample patches
         patches = patches[0::sub[0], 0::sub[1], :, :]
+        patches = f_patch(f_pointwise(patches))
         Xs = Xs[0::sub[0], 0::sub[1]]
         Ts = Ts[0::sub[0], 0::sub[1]]
         Xs = Xs.flatten()
@@ -216,16 +145,18 @@ class KSSimulation(object):
         self.thetas = np.zeros_like(Xs)
         self.patches = np.reshape(patches, (patches.shape[0]*patches.shape[1], pd[0]*pd[1]))
         self.pd = pd
-        self.f = f
+        self.f_pointwise = f_pointwise
+        self.f_patch = f_patch
 
-    def makeObservations(self, pd, nsamples, uniform=True, rotate = False, f = lambda x: x):
+    def makeObservations(self, pd, nsamples, uniform=True, rotate = False, \
+                            f_pointwise = lambda x: x, f_patch = lambda x: x):
         """
         Make random rectangular observations (possibly with rotation)
         Parameters
         ----------
         pd: tuple(int, int)
             The dimensions of each patch (height, width)
-        nsamples: tuple(int, int)
+        nsamples: int or tuple(int, int)
             The number of patches to sample, or the dimension of the 
             uniform grid from which to sample patches
         uniform: boolean
@@ -238,12 +169,16 @@ class KSSimulation(object):
         f_interp = self.getInterpolator(periodic=True)
         # Make sure a rotated patch is within the time range
         # (we usually don't have to worry about )
+        rotstr = ""
         if rotate:
+            rotstr = " rotated"
             r = np.sqrt((pd[0]/2)**2 + (pd[1]/2)**2)
         else:
             r = pd[0]/2.0
+        print("Making %s%s observations of dimension %s..."%(nsamples, rotstr, pd))
         self.pd = pd
-        self.f = f
+        self.f_pointwise = f_pointwise
+        self.f_patch = f_patch
         if isinstance(nsamples, tuple):
             M, N = nsamples
             x = np.linspace(0, self.I.shape[1], N)
@@ -254,8 +189,8 @@ class KSSimulation(object):
         else:
             # Pick center coordinates of each patch and rotation angle
             if uniform:
-                Y = np.random.rand(N*20, 2)
-                perm, labmdas = getGreedyPerm(Y, N)
+                Y = np.random.rand(nsamples*20, 2)
+                perm, labmdas = getGreedyPerm(Y, nsamples)
                 Y = Y[perm, :]
                 self.Ts = r + Y[:, 0]*(self.I.shape[0]-2*r)
                 self.Xs = Y[:, 1]*self.I.shape[1]
@@ -280,9 +215,9 @@ class KSSimulation(object):
             ts[i, :] = s*pdx + c*pdt + tc
         
         # Use interpolator to sample coordinates for all patches
-        patches = f(f_interp(ts.flatten(), xs.flatten(), grid=False))
-        self.patches = np.reshape(patches, ts.shape)
-
+        patches = (f_interp(ts.flatten(), xs.flatten(), grid=False))
+        patches = np.reshape(patches, ts.shape)
+        self.patches = f_patch(f_pointwise(patches))
 
     def getMahalanobisDists(self, delta, n_points, d = -10, maxeig = 10):
         """
@@ -456,8 +391,9 @@ class KSSimulation(object):
             self.plotPatchBoundary(i)
             plt.xlabel("Space")
             plt.ylabel("Time")
-            plt.xlim([0, I.shape[1]])
-            plt.ylim([I.shape[0], 0])
+            plt.axis('equal')
+            plt.xlim(0, I.shape[1])
+            plt.ylim(I.shape[0], 0)
 
             if Y.shape[1] == 3:
                 ax = plt.gcf().add_subplot(122, projection='3d')
@@ -496,9 +432,10 @@ def testKS_NLDM(pd = (150, 1), nsamples=1000, dMaxSqrCoeff = 1.0, skip=15, nperm
         Number of points to take in a greedy permutation
     """
     ks = KSSimulation()
-    ks.makeObservations(pd, nsamples, rotate=False)
+    f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
+    #f_patch = lambda patches: get_scattering(patches, pd, rotinvariant=False)
+    ks.makeObservations(pd, nsamples, rotate=True, f_patch=f_patch)
     #ks.makeObservationsIntegerGrid(pd, (2, 2))
-    #print("%i x %i patch grid"%(len(np.unique(ks.Ts)), len(np.unique(ks.Xs))))
 
     D = np.sum(ks.patches**2, 1)[:, None]
     DSqr = D + D.T - 2*ks.patches.dot(ks.patches.T)
@@ -550,7 +487,7 @@ def testKS_Rotations():
     ks.plotPatches()
 
 if __name__ == '__main__':
-    testKS_NLDM(pd = (64, 64), nsamples=(94, 201), dMaxSqrCoeff=0.4)
+    testKS_NLDM(pd = (64, 64), nsamples=(94, 201), dMaxSqrCoeff=10, skip=1)
     #testKS_Mahalanobis(pd = (50, 15), sub=(1, 4))
     #testKS_Variations()
     #testKS_Rotations()

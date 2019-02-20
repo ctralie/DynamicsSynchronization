@@ -70,11 +70,12 @@ class PDE2D(object):
     """
     def __init__(self):
         self.I = np.array([[]])
+        self.periodic = True
 
     def drawSolutionImage(self):
         plt.imshow(self.I, interpolation='none', aspect='auto', cmap='RdGy')
 
-    def getInterpolator(self, periodic = True):
+    def getInterpolator(self):
         """
         Create a 2D rect bivariate spline interpolator to sample
         from the solution set with interpolation
@@ -83,7 +84,7 @@ class PDE2D(object):
         I = self.I
         x = np.arange(I.shape[1])
         t = np.arange(I.shape[0])
-        if periodic:
+        if self.periodic:
             x = x[None, :]*np.ones((3, 1))
             x[0, :] -= I.shape[1]
             x[2, :] += I.shape[1]
@@ -136,9 +137,10 @@ class PDE2D(object):
         self.pd = pd
         self.f_pointwise = f_pointwise
         self.f_patch = f_patch
+        self.rotate_patches = False
 
-    def makeObservations(self, pd, nsamples, uniform=True, rotate = False, \
-                            f_pointwise = lambda x: x, f_patch = lambda x: x):
+    def makeObservations(self, pd, nsamples, uniform=True, periodic=True, rotate = False, \
+                            buff = 0.0, f_pointwise = lambda x: x, f_patch = lambda x: x):
         """
         Make random rectangular observations (possibly with rotation)
         Parameters
@@ -150,27 +152,40 @@ class PDE2D(object):
             uniform grid from which to sample patches
         uniform: boolean
             Whether to sample the centers uniformly spatially
+        periodic: boolean
+            Whether to enforce periodic boundary conditions
         rotate: boolean
             Whether to randomly rotate the patches
-        f: function ndarray->ndarray
+        buff: float
+            A buffer to include around the edges of the patches 
+            that are sampled.  If periodic is true, only use
+            this buffer in the vertical direction
+        f_pointwise: function ndarray->ndarray
             A pointwise homeomorphism to apply to pixels in the observation function
         """
-        f_interp = self.getInterpolator(periodic=True)
+        self.periodic = periodic
+        f_interp = self.getInterpolator()
         # Make sure a rotated patch is within the time range
-        # (we usually don't have to worry about )
+        # (we usually don't have to worry about space since it's periodic)
         rotstr = ""
         if rotate:
             rotstr = " rotated"
             r = np.sqrt((pd[0]/2)**2 + (pd[1]/2)**2)
+            self.rotate_patches = True
         else:
             r = pd[0]/2.0
+            self.rotate_patches = False
+        r += buff
         print("Making %s%s observations of dimension %s..."%(nsamples, rotstr, pd))
         self.pd = pd
         self.f_pointwise = f_pointwise
         self.f_patch = f_patch
         if isinstance(nsamples, tuple):
             M, N = nsamples
-            x = np.linspace(0, self.I.shape[1], N)
+            if periodic:
+                x = np.linspace(0, self.I.shape[1], N)
+            else:
+                x = np.linspace(r, self.I.shape[1]-r, N)
             t = np.linspace(r, self.I.shape[0]-r, M)
             x, t = np.meshgrid(x, t)
             self.Ts = t.flatten()
@@ -182,10 +197,16 @@ class PDE2D(object):
                 perm, labmdas = getGreedyPerm(Y, nsamples)
                 Y = Y[perm, :]
                 self.Ts = r + Y[:, 0]*(self.I.shape[0]-2*r)
-                self.Xs = Y[:, 1]*self.I.shape[1]
+                if periodic:
+                    self.Xs = Y[:, 1]*self.I.shape[1]
+                else:
+                    self.Xs = r + Y[:, 1]*(self.I.shape[1]-2*r)
             else:
                 self.Ts = r+np.random.rand(N)*(self.I.shape[0]-2*r)
-                self.Xs = np.random.rand(N)*self.I.shape[1]
+                if periodic:
+                    self.Xs = np.random.rand(N)*self.I.shape[1]
+                else:
+                    self.Xs = r+np.random.rand(N)*(self.I.shape[1]-2*r)
         if rotate:
             self.thetas = np.random.rand(self.Xs.size)*2*np.pi
         else:
@@ -197,11 +218,11 @@ class PDE2D(object):
         pdt = pdt.flatten()
         ts = np.zeros((self.Xs.size, pdt.size))
         xs = np.zeros((self.Xs.size, pdx.size))
+
         # Setup all coordinate locations to sample
-        for i, (theta, tc, xc) in enumerate(zip(self.thetas, self.Ts, self.Xs)):
-            c, s = np.cos(theta), np.sin(theta)
-            xs[i, :] = c*pdx - s*pdt + xc
-            ts[i, :] = s*pdx + c*pdt + tc
+        cs, ss = np.cos(self.thetas), np.sin(self.thetas)
+        xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdt[None, :] + self.Xs[:, None]
+        ts = ss[:, None]*pdx[None, :] + cs[:, None]*pdt[None, :] + self.Ts[:, None]
         
         # Use interpolator to sample coordinates for all patches
         patches = (f_interp(ts.flatten(), xs.flatten(), grid=False))
@@ -237,12 +258,15 @@ class PDE2D(object):
         dim = self.patches.shape[1] #The dimension of each patch
         maxeig = min(maxeig, d)
         maxeig = min(maxeig, dim)
-        ## Step 1: Setup interpolator
-        f_interp = self.getInterpolator(periodic=True)
+        
+        ## Step 1: Setup interpolator and observation functions
+        f_interp = self.getInterpolator()
+        f_pointwise = self.f_pointwise
+        f_patch = self.f_patch
 
         ## Step 2: For each patch, sample near patches
         ## and compute covariance matrix
-        pdx, pdt = np.meshgrid(np.arange(self.pd[1]), np.arange(self.pd[0]))
+        pdx, pdt = np.meshgrid(even_interval(self.pd[1]), -even_interval(self.pd[0]))
         pdx = pdx.flatten()
         pdt = pdt.flatten()
         N = self.patches.shape[0]
@@ -258,14 +282,24 @@ class PDE2D(object):
                 print("%i of %i"%(i, N))
             x0 = self.Xs[i]
             t0 = self.Ts[i]
+            # Sample centers of each neighboring patch
+            # in a disc around the original patch
             rs = delta*np.sqrt(np.random.rand(n_points))
-            thetas = 2*np.pi*np.random.rand(n_points)
-            xs = x0 + rs*np.cos(thetas) # Left of each patch sample
-            ts = t0 + rs*np.sin(thetas) # Top of each patch sample
-            xs = xs[:, None] + pdx[None, :]
-            ts = ts[:, None] + pdt[None, :]
-            Y = self.f(f_interp(ts.flatten(), xs.flatten(), grid=False))
-            Y = np.reshape(Y, (n_points, pdx.size)) - y[None, :] # Center samples
+            thetasc = 2*np.pi*np.random.rand(n_points)
+            xc = x0 + rs*np.cos(thetasc)
+            tc = t0 + rs*np.sin(thetasc)
+            # Randomly rotate each patch
+            thetasorient = np.zeros(n_points)
+            if self.rotate_patches:
+                thetasorient = 2*np.pi*np.random.rand(n_points)
+            cs = np.cos(thetasorient)
+            ss = np.sin(thetasorient)
+            xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdt[None, :] + xc[:, None]
+            ts = ss[:, None]*pdx[None, :] + cs[:, None]*pdt[None, :] + tc[:, None]
+            patches = f_interp(ts.flatten(), xs.flatten(), grid=False)
+            patches = np.reshape(patches, (n_points, pdx.size))
+            patches = f_patch(f_pointwise(patches))
+            Y = patches - y[None, :] # Center samples
             C = (Y.T).dot(Y)
             w, v = slinalg.eigh(C, eigvals=(C.shape[1]-maxeig, C.shape[1]-1))
             # Put largest eigenvectors first

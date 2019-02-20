@@ -50,11 +50,11 @@ def testKS_NLDM(pd = (150, 1), nsamples=1000, dMaxSqrCoeff = 1.0, skip=15, nperm
 
 
 
-def testKS_Mahalanobis(pd = (15, 15), NSamples = 10000):
+def testKS_Mahalanobis(pd, nsamples, delta):
     ks = KSSimulation()
-    ks.makeObservations(pd, NSamples)
-    DSqr = ks.getMahalanobisDists(delta=3, n_points=100, d=2)
-    Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqrCoeff = 10.0)
+    ks.makeObservations(pd, nsamples, buff=delta)
+    DSqr = ks.getMahalanobisDists(delta=delta, n_points=100, d=2)
+    Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqrCoeff = 0.01)
     sio.savemat("Y.mat", {"Y":Y})
     perm, lambdas = getGreedyPerm(Y, 600)
     plt.figure()
@@ -84,14 +84,14 @@ def testKS_Variations():
 
 def testKS_Rotations():
     ks = KSSimulation()
-    ks.makeObservations((80, 40), (20, 20), rotate=False)
+    ks.makeObservations((80, 40), (20, 20), rotate=True)
     
     ks.plotPatches(False)
     plt.show()
     ks.plotPatches()
 
 if __name__ == '__main__':
-    testKS_NLDM(pd = (64, 64), nsamples=(94, 201), dMaxSqrCoeff=10, skip=1)
-    #testKS_Mahalanobis(pd = (50, 15), sub=(1, 4))
+    #testKS_NLDM(pd = (64, 64), nsamples=(94, 201), dMaxSqrCoeff=10, skip=1)
+    testKS_Mahalanobis(pd = (150, 1), nsamples=(94, 150), delta=3)
     #testKS_Variations()
     #testKS_Rotations()

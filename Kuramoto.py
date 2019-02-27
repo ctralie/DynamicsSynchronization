@@ -50,21 +50,30 @@ def testKS_NLDM(pd = (150, 1), nsamples=1000, dMaxSqrCoeff = 1.0, skip=15, nperm
 
 
 
-def testKS_Mahalanobis(pd, nsamples, delta, rotate=False):
+def testKS_Diffusion(pd, nsamples, delta, rotate=False, dMaxSqr=1.0, do_mahalanobis=False, d=2, kappa=0.2, do_tda=False):
     f_patch = lambda x: x
-    if rotate:
+    if rotate or True:
+        #f_patch = lambda patches: get_ftm2d_polar(patches, pd, res=32)
         f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
     ks = KSSimulation()
     ks.makeObservations(pd, nsamples, buff=delta, rotate=rotate, f_patch=f_patch)
-    DSqr = ks.getMahalanobisDists(delta=delta, n_points=100, d=5)
-    Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqrCoeff = 1.0)
+    if do_mahalanobis:
+        res = ks.getMahalanobisDists(delta=delta, n_points=100, d=d, kappa=kappa)
+        sio.savemat("DSqr.mat", res)
+        res = sio.loadmat("DSqr.mat")
+        DSqr, mask = res["gamma"], res["mask"]
+    else:
+        D = np.sum(ks.patches**2, 1)[:, None]
+        DSqr = D + D.T - 2*ks.patches.dot(ks.patches.T)
+    Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqr)
     plt.show()
     
-    perm, lambdas = getGreedyPerm(Y, 600)
-    plt.figure()
-    dgms = ripser(Y[perm, :], maxdim=2)["dgms"]
-    plot_dgms(dgms, show=False)
-    plt.show()
+    if do_tda:
+        perm, lambdas = getGreedyPerm(Y, 600)
+        plt.figure()
+        dgms = ripser(Y[perm, :], maxdim=2)["dgms"]
+        plot_dgms(dgms, show=False)
+        plt.show()
     
     ks.makeVideo(Y, skip=15)
 
@@ -97,6 +106,6 @@ def testKS_Rotations():
 
 if __name__ == '__main__':
     #testKS_NLDM(pd = (64, 64), nsamples=(94, 201), dMaxSqrCoeff=10, skip=1)
-    testKS_Mahalanobis(pd = (50, 50), nsamples=(94, 150), delta=1, rotate=True)
+    testKS_Diffusion(pd = (64, 64), nsamples=(94, 201), delta=2, dMaxSqr=0.4, rotate=False)
     #testKS_Variations()
     #testKS_Rotations()

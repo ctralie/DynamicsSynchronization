@@ -60,6 +60,7 @@ def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 1, delta=2,
         f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
     #f_patch = get_pc_histograms
     #f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
+    #f_patch = lambda patches: get_ftm2d_polar(patches, pd)
 
     pde.makeObservations(pd=pd, nsamples=nsamples, periodic=periodic, buff=delta, rotate=rotate, f_patch=f_patch)
     Xs = pde.Xs
@@ -98,9 +99,9 @@ def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 1, delta=2,
 
 if __name__ == '__main__':
     #pde = Parabaloid(100, 100)
-    pde = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=1); nsamples=(30, 30); kappa=0.05
+    pde = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=2); nsamples=(30, 30); kappa=0.05
     #pde = TorusDist(35, 100, (0.2, 0.2), alpha_phi=0); nsamples=(1, 500); kappa=0.2
     testMahalanobis(pde, pd=(25, 25), nsamples=nsamples, \
-                    dMaxSqr=10, delta=3, d=2, kappa=kappa,\
-                    periodic=True, rotate=False, do_mahalanobis=True)
+                    dMaxSqr=1000, delta=3, d=2, kappa=kappa,\
+                    periodic=True, rotate=False, do_mahalanobis=False)
     plt.show()

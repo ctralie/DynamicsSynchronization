@@ -6,6 +6,8 @@ from kymatio import Scattering2D
 from scipy import interpolate
 from scipy.ndimage.filters import gaussian_filter1d as gf1d
 from sklearn.decomposition import PCA
+from scipy.fftpack import fft2 as fft2
+import time
 
 def get_spinimage(im, n_angles=50, do_plot=False):
     """
@@ -69,7 +71,7 @@ def get_shells(patches, pd, n_shells, r_max = None):
         The result of integration in each shell for each patch
     """
     if not r_max:
-        r_max = np.sqrt((pd[0]/2.0)**2 + (pd[1]/2.0)**2)
+        r_max = float(min(pd[0], pd[1]))/2.0
     centers = np.linspace(0, r_max, n_shells+1)[0:-1]
     sigma = centers[1]-centers[0]
     centers += sigma/2
@@ -82,7 +84,7 @@ def get_shells(patches, pd, n_shells, r_max = None):
     rs = np.sqrt(x**2 + y**2)
     shells = np.zeros((patches.shape[0], n_shells))
     for i, c in enumerate(centers):
-        weights = np.exp(-(rs-c)**2/(2*sigma**2))
+        weights = np.exp(-(rs-c)**2/(2*sigma**2))*(rs <= r_max)
         shells[:, i] = np.sum(weights[None, :]*patches, 1)/np.sum(weights)
     return shells
 
@@ -119,6 +121,43 @@ def get_pc_histograms(patches, n_bins=50, n_pcs=3):
     pca = PCA(n_components=n_pcs)
     return pca.fit_transform(H)
 
+def get_ftm2d_polar(patches, pd, res=32, r_max = None):
+    """
+    Calculate the magnitude of the 2D fourier transform of
+    polar coordinates
+    Parameters
+    ----------
+    patches: ndarray(n_patches, pd[0]*pd[1])
+        All of the patches
+    pd: tuple(int, int)
+        The height x width of each patch
+    res: int
+        Resolution in theta and in r of the 2D FFT
+    r_max: float
+        The max radius up to which to go.  If None,
+        then take the radius to be sqrt((pd[0]/2)^2 + (pd[1]/2)^2)
+    """
+    print("Getting FTM2D polar descriptors...")
+    tic = time.time()
+    if not r_max:
+        r_max = float(min(pd[0], pd[1]))/2.0
+    N = patches.shape[0]
+    pixx = np.arange(pd[1]) - float(pd[1])/2
+    pixy = np.arange(pd[0]) - float(pd[0])/2
+    thetas = np.linspace(0, 2*np.pi, res+1)[0:res]
+    rs = np.linspace(0, r_max, res)
+    xs = rs[:, None]*np.cos(thetas[None, :])
+    ys = rs[:, None]*np.sin(thetas[None, :])
+    xs, ys = xs.flatten(), ys.flatten()
+    ftm2d_polar = np.zeros((N, res*res))
+    for i in range(N):
+        p = np.reshape(patches[i, :], pd)
+        f = interpolate.RectBivariateSpline(pixy, pixx, p)
+        polar = f(xs, ys, grid=False)
+        polar = np.reshape(polar, (res, res))
+        ftm2d_polar[i, :] = np.abs(fft2(polar)).flatten()
+    print("Elapsed Time: %.3g"%(time.time()-tic))
+    return ftm2d_polar
 
 def get_scattering(patches, pd, J=4, L=8, rotinvariant=True):
     """
@@ -147,7 +186,62 @@ def get_scattering(patches, pd, J=4, L=8, rotinvariant=True):
     #res = np.zeros((patches.shape[0], 2+L))
     return np.reshape(coeffs, (patches.shape[0], coeffs.shape[2]*coeffs.shape[3]*coeffs.shape[4]))
 
+def testFourierRotation(im, n_angles=30, res = 32):
+    M, N = im.shape[0], im.shape[1]
+    r = float(min(M, N))/2.0
+    pixx = np.arange(N) - float(N)/2
+    pixy = np.arange(M) - float(M)/2
+    f = interpolate.RectBivariateSpline(pixy, pixx, im)
+    D = int(np.ceil(np.sqrt(M**2+N**2)))
+
+    pix = np.arange(D) - float(D)/2
+    x, y = np.meshgrid(pix, pix)
+    x = x.flatten()
+    y = y.flatten()
+    pixd = np.arange(D)-float(D)/2
+    
+
+    thetas = np.linspace(0, 2*np.pi, res+1)[0:res]
+    rs = np.linspace(0, r, res)
+    xs = rs[:, None]*np.cos(thetas[None, :])
+    ys = rs[:, None]*np.sin(thetas[None, :])
+    xs, ys = xs.flatten(), ys.flatten()
+
+    thetas = np.linspace(0, 2*np.pi, 100)
+    plt.figure(figsize=(18, 6))
+    print("r = %i"%r)
+    for i, t in enumerate(np.linspace(0, 2*np.pi, n_angles+1)[0:n_angles]):
+        c, s = np.cos(t), np.sin(t)
+        xt = c*x + s*y
+        yt = -s*x + c*y
+        It = f(yt, xt, grid=False)
+        It[np.abs(yt) > float(M)/2] = 0
+        It[np.abs(xt) > float(N)/2] = 0
+        It = np.reshape(It, (D, D))
+        ft = interpolate.RectBivariateSpline(pixd, pixd, It)
+        polar = ft(xs, ys, grid=False)
+        polar = np.reshape(polar, (res, res))
+        polar_ftm2d = np.abs(fft2(polar))
+
+        plt.clf()
+        plt.subplot(131)
+        plt.imshow(It)
+        plt.plot(r*np.cos(thetas)+float(D)/2, r*np.sin(thetas)+float(D)/2)
+        plt.title("Original")
+        plt.subplot(132)
+        plt.imshow(polar)
+        plt.gca().invert_yaxis()
+        plt.xlabel("$\\theta$")
+        plt.ylabel("r")
+        plt.title("Polar")
+        plt.subplot(133)
+        plt.imshow(polar_ftm2d)
+        plt.title("Polar FTM2D")
+        plt.savefig("%i.png"%i, bbox_inches='tight')
+
+
 if __name__ == '__main__':
     res = sio.loadmat("KS.mat")
     I = res["data"]
     im = I[0:64, 0:64]
+    testFourierRotation(im)

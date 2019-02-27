@@ -50,18 +50,23 @@ def testKS_NLDM(pd = (150, 1), nsamples=1000, dMaxSqrCoeff = 1.0, skip=15, nperm
 
 
 
-def testKS_Mahalanobis(pd, nsamples, delta):
+def testKS_Mahalanobis(pd, nsamples, delta, rotate=False):
+    f_patch = lambda x: x
+    if rotate:
+        f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
     ks = KSSimulation()
-    ks.makeObservations(pd, nsamples, buff=delta)
-    DSqr = ks.getMahalanobisDists(delta=delta, n_points=100, d=2)
-    Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqrCoeff = 0.01)
-    sio.savemat("Y.mat", {"Y":Y})
+    ks.makeObservations(pd, nsamples, buff=delta, rotate=rotate, f_patch=f_patch)
+    DSqr = ks.getMahalanobisDists(delta=delta, n_points=100, d=5)
+    Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqrCoeff = 1.0)
+    plt.show()
+    
     perm, lambdas = getGreedyPerm(Y, 600)
     plt.figure()
     dgms = ripser(Y[perm, :], maxdim=2)["dgms"]
     plot_dgms(dgms, show=False)
     plt.show()
-    ks.makeVideo(Y[:, 0:2], skip=15)
+    
+    ks.makeVideo(Y, skip=15)
 
 
 def testKS_Variations():
@@ -92,6 +97,6 @@ def testKS_Rotations():
 
 if __name__ == '__main__':
     #testKS_NLDM(pd = (64, 64), nsamples=(94, 201), dMaxSqrCoeff=10, skip=1)
-    testKS_Mahalanobis(pd = (150, 1), nsamples=(94, 150), delta=3)
+    testKS_Mahalanobis(pd = (50, 50), nsamples=(94, 150), delta=1, rotate=True)
     #testKS_Variations()
     #testKS_Rotations()

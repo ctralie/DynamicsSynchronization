@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import sklearn.feature_extraction.image as skimage
 import time
 from scipy import interpolate
+import scipy.sparse as sparse
 from mpl_toolkits.mplot3d import Axes3D
 from ripser import ripser, plot_dgms
 import torch
@@ -14,7 +15,7 @@ from DiffusionMaps import *
 from LocalPCA import *
 from PatchDescriptors import *
 
-def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True):
+def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True, mask=np.array([])):
     c = plt.get_cmap('magma_r')
     C2 = c(np.array(np.round(255.0*Xs/np.max(Xs)), dtype=np.int32))
     C2 = C2[:, 0:3]
@@ -23,7 +24,7 @@ def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True):
     print("t = %g"%t)
     print("Doing diffusion maps on %i points"%(DSqr.shape[0]))
     tic = time.time()
-    Y = getDiffusionMap(DSqr, t, distance_matrix=True, neigs=4, thresh=1e-10)
+    Y = getDiffusionMap(DSqr, t, distance_matrix=True, neigs=4, thresh=1e-10, mask=mask)
     Y = np.fliplr(Y)
     print("Elapsed Time: %.3g"%(time.time()-tic))
     Y = Y[:, 1::]
@@ -229,7 +230,7 @@ class PDE2D(object):
         patches = np.reshape(patches, ts.shape)
         self.patches = f_patch(f_pointwise(patches))
 
-    def getMahalanobisDists(self, delta, n_points, d = -10, maxeig = 10):
+    def getMahalanobisDists(self, delta, n_points, d = -10, maxeig = 10, kappa = 1):
         """
         Compute the Mahalanobis distance between all pairs of points
         To quote from the Singer/Coifman paper:
@@ -252,6 +253,9 @@ class PDE2D(object):
         maxeig: int (default 10)
             The maximum number of eigenvectors to compute
             (should be at least d)
+        kappa: float
+            A number in [0, 1] indicating the proportion of mutual nearest
+            neighbors to use, in the original patch metric
         """
         if maxeig < d:
             warnings.warn("maxeig = %i < d = %i"%(maxeig, d))
@@ -273,7 +277,6 @@ class PDE2D(object):
 
         print("Computing Jacobians...")
         tic = time.time()
-        #"""
         ws = np.zeros((N, maxeig))
         vs = np.zeros((N, dim, maxeig))
         for i in range(N):
@@ -283,11 +286,10 @@ class PDE2D(object):
             x0 = self.Xs[i]
             t0 = self.Ts[i]
             # Sample centers of each neighboring patch
-            # in a disc around the original patch
-            rs = delta*np.sqrt(np.random.rand(n_points))
+            # in a circle around the original patch
             thetasc = 2*np.pi*np.random.rand(n_points)
-            xc = x0 + rs*np.cos(thetasc)
-            tc = t0 + rs*np.sin(thetasc)
+            xc = x0 + delta*np.cos(thetasc)
+            tc = t0 + delta*np.sin(thetasc)
             # Randomly rotate each patch
             thetasorient = np.zeros(n_points)
             if self.rotate_patches:
@@ -307,17 +309,14 @@ class PDE2D(object):
             v = np.fliplr(v)
             ws[i, :] = w
             vs[i, :, :] = v
-        sio.savemat("vs.mat", {"vs":vs, "ws":ws})
-        #"""
-        #"""
-        res = sio.loadmat("vs.mat")
-        vs, ws = res["vs"], res["ws"]
-        #"""
         print("Elapsed Time: %.3g"%(time.time()-tic))
-        if d < 0:
-            # Estimate dimension using eigengaps
+        # Estimate dimension using eigengaps
+        if not (d == 1):
             ratios = np.median(ws[:, 0:-1]/ws[:, 1::], 0)
-            d = np.argmax(np.sign(ratios+d)) + 1
+            d_est = np.argmax(np.sign(ratios+d)) + 1
+            print("d_est = %i"%d_est)
+            if d < 0:
+                d = d_est
 
         ## Step 3: Compute squared Mahalanobis distance between
         ## all pairs of points
@@ -331,14 +330,27 @@ class PDE2D(object):
         tic = time.time()
         for k in range(maxeig):
             Dk = D[:, :, k]
-            Dk_diag = np.diag(Dk)
             wk = ws[:, k]
+            Dk_diag = np.diag(Dk)
             gamma += (Dk_diag[:, None] - Dk.T)**2/wk[:, None]
             gamma += (Dk - Dk_diag[None, :])**2/wk[None, :]
         gamma *= 0.5*(delta**2)/(maxeig+2)
         print("Elapsed Time: %.3g"%(time.time()-tic))
-        return gamma
 
+        ## Step 4: Make distances infinity between points
+        ## that are not mutual nearest neighbors in the original metric
+        mask = np.ones((N, N))
+        if kappa < 1:
+            NNeighbs = int(np.floor(kappa*N))
+            D = np.sum(self.patches**2, 1)[:, None]
+            DSqr = D + D.T - 2*self.patches.dot(self.patches.T)
+            J = np.argpartition(DSqr, NNeighbs, 1)[:, 0:NNeighbs]
+            I = np.tile(np.arange(N)[:, None], (1, NNeighbs))
+            V = np.ones(I.size)
+            [I, J] = [I.flatten(), J.flatten()]
+            mask = sparse.coo_matrix((V, (I, J)), shape=(N, N))
+            mask = mask.toarray()
+        return {'gamma':gamma, 'mask':mask}
 
     
     def plotPatchBoundary(self, i, draw_arrows=True):
@@ -394,22 +406,28 @@ class PDE2D(object):
                 plt.imshow(p, interpolation='none', cmap='RdGy', vmin=np.min(self.I), vmax=np.max(self.I))
                 plt.savefig("%i.png"%i, bbox_inches='tight')
 
-    def makeVideo(self, Y, skip=20):
+    def makeVideo(self, Y, D = np.array([]), skip=20, cmap='magma_r'):
         """
         Make a video given a nonlinear dimension reduction, which
         is assumed to be parallel to the patches
         """
         colorvar = self.Xs
-        c = plt.get_cmap('magma_r')
+        c = plt.get_cmap(cmap)
         C = c(np.array(np.round(255.0*colorvar/np.max(colorvar)), dtype=np.int32))
         C = C[:, 0:3]
-        fig = plt.figure(figsize=(12, 6))
+        sprefix = 120
+        if D.size > 0:
+            fig = plt.figure(figsize=(18, 6))
+            sprefix = 130
+        else:
+            fig = plt.figure(figsize=(12, 6))
         I, Xs, Ts = self.I, self.Xs, self.Ts
 
         idx = 0
-        for i in range(0, Y.shape[0], skip):
+        N = Y.shape[0]
+        for i in range(0, N, skip):
             plt.clf()
-            plt.subplot(121)
+            plt.subplot(sprefix+1)
             plt.imshow(I, interpolation='none', aspect='auto', cmap='RdGy')
             self.plotPatchBoundary(i)
             plt.xlabel("Space")
@@ -419,12 +437,12 @@ class PDE2D(object):
             plt.ylim(I.shape[0], 0)
 
             if Y.shape[1] == 3:
-                ax = plt.gcf().add_subplot(122, projection='3d')
+                ax = plt.gcf().add_subplot(sprefix+2, projection='3d')
                 ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=np.array([[0, 0, 0, 0]]))
                 ax.scatter(Y[0:i+1, 0], Y[0:i+1, 1], Y[0:i+1, 2], c=C[0:i+1, :])
                 ax.scatter(Y[i, 0], Y[i, 1], Y[i, 2], 'r')
             else:
-                plt.subplot(122)
+                plt.subplot(sprefix+2)
                 plt.scatter(Y[:, 0], Y[:, 1], 100, c=np.array([[0, 0, 0, 0]]))
                 plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C[0:i+1, :])
                 plt.scatter(Y[i, 0], Y[i, 1], 40, 'r')
@@ -433,6 +451,15 @@ class PDE2D(object):
                 ax.set_facecolor((0.15, 0.15, 0.15))
                 ax.set_xticks([])
                 ax.set_yticks([])
+            if D.size > 0:
+                plt.subplot(133)
+                plt.imshow(D, cmap='magma_r', interpolation='none')
+
+                plt.plot([i, i], [0, N], 'c')
+                plt.plot([0, N], [i, i], 'c')
+                plt.xlim([0, N])
+                plt.ylim([N, 0])
+
             plt.savefig("%i.png"%idx)
             idx += 1
 

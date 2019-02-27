@@ -19,7 +19,7 @@ def getSSM(X):
     D = np.sqrt(D)
     return D
 
-def getDiffusionMap(X, eps, distance_matrix=False, neigs = 4, thresh=5e-4):
+def getDiffusionMap(X, eps, distance_matrix=False, neigs = 4, thresh=1e-10, mask = np.array([])):
     """
     Perform diffusion maps with a unit timestep, automatically
     normalizing for nonuniform sampling
@@ -38,6 +38,8 @@ def getDiffusionMap(X, eps, distance_matrix=False, neigs = 4, thresh=5e-4):
     thresh: float
         Threshold below which to zero out entries in
         the Markov chain approximation
+    mask: ndarray(N, N)
+        A mask for the distances to include
     """
     tic = time.time()
     print("Building diffusion map matrix...")
@@ -47,6 +49,8 @@ def getDiffusionMap(X, eps, distance_matrix=False, neigs = 4, thresh=5e-4):
         D = np.sum(X**2, 1)[:, None]
         DSqr = D + D.T - 2*X.dot(X.T)
     K = np.exp(-DSqr/(2*eps))
+    if mask.size > 0:
+        K *= mask
     P = np.sum(K, 1)
     P[P == 0] = 1
     KHat = (K/P[:, None])/P[None, :]

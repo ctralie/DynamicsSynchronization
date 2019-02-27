@@ -5,6 +5,7 @@ import torch
 from kymatio import Scattering2D
 from scipy import interpolate
 from scipy.ndimage.filters import gaussian_filter1d as gf1d
+from sklearn.decomposition import PCA
 
 def get_spinimage(im, n_angles=50, do_plot=False):
     """
@@ -104,6 +105,19 @@ def get_derivative_shells(patches, pd, n_shells, shells_fn = get_shells, orders 
         shells /= np.std(shells)
         all_shells.append(shells)
     return np.concatenate(tuple(all_shells), 1)
+
+
+def get_pc_histograms(patches, n_bins=50, n_pcs=3):
+    """
+    Compute principal components of histograms
+    """
+    N = patches.shape[0]
+    H = np.zeros((N, n_bins))
+    lims = (np.min(patches), np.max(patches))
+    for i in range(N):
+        H[i, :] = np.histogram(patches[i, :], range=lims, bins=n_bins)[0]
+    pca = PCA(n_components=n_pcs)
+    return pca.fit_transform(H)
 
 
 def get_scattering(patches, pd, J=4, L=8, rotinvariant=True):

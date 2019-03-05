@@ -30,9 +30,16 @@ def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True, mask=np.array(
     Y = Y[:, 1::]
 
     if do_plot:
-        ax = plt.gcf().add_subplot(111, projection='3d')
+        plt.figure(figsize=(12, 6))
+        ax = plt.gcf().add_subplot(121, projection='3d')
         ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=C2)
         plt.title("Diffusion Maps By Space")
+        plt.subplot(122)
+        DShow = np.array(DSqr)
+        DShow[DShow < 0] = 0
+        DShow = np.sqrt(DShow)
+        DShow[mask == 0] = np.nan
+        plt.imshow(DShow)
     return Y
 
 

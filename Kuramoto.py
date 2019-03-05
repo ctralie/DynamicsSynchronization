@@ -50,13 +50,14 @@ def testKS_NLDM(pd = (150, 1), nsamples=1000, dMaxSqrCoeff = 1.0, skip=15, nperm
 
 
 
-def testKS_Diffusion(pd, nsamples, delta, rotate=False, dMaxSqr=1.0, do_mahalanobis=False, d=2, kappa=0.2, do_tda=False):
+def testKS_Diffusion(pd, nsamples, delta, rotate=False, use_rotinvariant = False, dMaxSqr=1.0, do_mahalanobis=False, d=2, kappa=0.1, do_tda=False):
     f_patch = lambda x: x
-    if rotate or True:
+    if use_rotinvariant:
         #f_patch = lambda patches: get_ftm2d_polar(patches, pd, res=32)
         f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
     ks = KSSimulation()
     ks.makeObservations(pd, nsamples, buff=delta, rotate=rotate, f_patch=f_patch)
+    mask = np.array([])
     if do_mahalanobis:
         res = ks.getMahalanobisDists(delta=delta, n_points=100, d=d, kappa=kappa)
         sio.savemat("DSqr.mat", res)
@@ -65,8 +66,9 @@ def testKS_Diffusion(pd, nsamples, delta, rotate=False, dMaxSqr=1.0, do_mahalano
     else:
         D = np.sum(ks.patches**2, 1)[:, None]
         DSqr = D + D.T - 2*ks.patches.dot(ks.patches.T)
-    Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqr)
-    plt.show()
+    Y = doDiffusionMaps(DSqr, ks.Xs, dMaxSqr, mask=mask, do_plot=True)
+    plt.savefig("DiffusionMaps.png", bbox_inches='tight')
+    #plt.show()
     
     if do_tda:
         perm, lambdas = getGreedyPerm(Y, 600)
@@ -75,7 +77,7 @@ def testKS_Diffusion(pd, nsamples, delta, rotate=False, dMaxSqr=1.0, do_mahalano
         plot_dgms(dgms, show=False)
         plt.show()
     
-    ks.makeVideo(Y, skip=15)
+    ks.makeVideo(Y, skip=1)
 
 
 def testKS_Variations():
@@ -106,6 +108,6 @@ def testKS_Rotations():
 
 if __name__ == '__main__':
     #testKS_NLDM(pd = (64, 64), nsamples=(94, 201), dMaxSqrCoeff=10, skip=1)
-    testKS_Diffusion(pd = (64, 64), nsamples=(94, 201), delta=2, dMaxSqr=0.4, rotate=False)
+    testKS_Diffusion(pd = (64, 64), nsamples=(150, 150), delta=2, dMaxSqr=1, rotate=True, use_rotinvariant=True, do_mahalanobis=True)
     #testKS_Variations()
     #testKS_Rotations()

@@ -141,6 +141,7 @@ def get_ftm2d_polar(patches, pd, res=32, r_max = None):
     tic = time.time()
     if not r_max:
         r_max = float(min(pd[0], pd[1]))/2.0
+    print("r_max = %.3g"%r_max)
     N = patches.shape[0]
     pixx = np.arange(pd[1]) - float(pd[1])/2
     pixy = np.arange(pd[0]) - float(pd[0])/2

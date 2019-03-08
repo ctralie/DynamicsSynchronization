@@ -13,7 +13,7 @@ from DiffusionMaps import *
 from LocalPCA import *
 from PatchDescriptors import *
 
-def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True, mask=np.array([])):
+def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True, neigs=4, mask=np.array([])):
     c = plt.get_cmap('magma_r')
     C2 = c(np.array(np.round(255.0*Xs/np.max(Xs)), dtype=np.int32))
     C2 = C2[:, 0:3]
@@ -22,7 +22,7 @@ def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True, mask=np.array(
     print("t = %g"%t)
     print("Doing diffusion maps on %i points"%(DSqr.shape[0]))
     tic = time.time()
-    Y = getDiffusionMap(DSqr, t, distance_matrix=True, neigs=4, thresh=1e-10, mask=mask)
+    Y = getDiffusionMap(DSqr, t, distance_matrix=True, neigs=neigs, thresh=1e-10, mask=mask)
     Y = np.fliplr(Y)
     print("Elapsed Time: %.3g"%(time.time()-tic))
     Y = Y[:, 1::]

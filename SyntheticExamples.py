@@ -54,6 +54,47 @@ class TorusDist(PDE2D):
         dist = (np.abs(dx)**lp + np.abs(dy)**lp)**(1.0/lp)
         self.I = np.tile(np.reshape(dist, (M, N)), (tile_y, tile_x))
 
+class TorusMultiDist(PDE2D):
+    """
+    A torus parameterized on [0, 1] x [0, 1], with
+    an observation function as the distance to some point
+    """
+    def __init__(self, M, N, n_points, tile_x = 1, tile_y = 1):
+        """
+        Parameters
+        ----------
+        M: int
+            Number of samples along y (phi) in principal square
+        N: int
+            Number of samples along x (theta) in principal square
+        n_points: int
+            Number of points to take on the torus
+        tile_x: int
+            Number of times to repeat along x
+        tile_y: int
+            Number of times to repeat along y
+        """
+        self.M = M
+        self.N = N
+        self.I = np.array([])
+        self.sites = np.random.rand(n_points, 2)
+        self.sites[:, 1] = self.sites[:, 0]
+        for i in range(n_points):
+            alpha_theta, alpha_phi = np.random.rand(2)
+            lp = np.random.randint(1, 3)
+            Ti = TorusDist(M, N, self.sites[i, :], tile_x, tile_y, alpha_theta, alpha_phi, lp)
+            if i == 0:
+                self.I = Ti.I
+            else:
+                self.I = np.minimum(self.I, Ti.I)
+    
+    def show_sites(self):
+        self.drawSolutionImage()
+        print(self.sites)
+        plt.scatter(self.sites[:, 1]*self.N, self.sites[:, 0]*self.M)
+
+
+
 def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 1, delta=2, kappa=1, rotate=False, do_mahalanobis=True, d=4, periodic=False, cmap='magma_r'):
     f_patch = lambda x: x
     if rotate:
@@ -97,9 +138,13 @@ def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 1, delta=2,
 
 if __name__ == '__main__':
     #pde = Parabaloid(100, 100)
-    pde = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=2); nsamples=(30, 30); kappa=0.05
+    #pde = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=2); nsamples=(30, 30); kappa=0.05
     #pde = TorusDist(35, 100, (0.2, 0.2), alpha_phi=0); nsamples=(1, 500); kappa=0.2
+    pde = TorusMultiDist(100, 100, 1, tile_y=1)
+    pde.show_sites()
+    """
     testMahalanobis(pde, pd=(25, 25), nsamples=nsamples, \
                     dMaxSqr=1000, delta=3, d=2, kappa=kappa,\
                     periodic=True, rotate=False, do_mahalanobis=False)
+    """
     plt.show()

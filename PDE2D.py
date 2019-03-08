@@ -7,8 +7,6 @@ import time
 from scipy import interpolate
 import scipy.sparse as sparse
 from mpl_toolkits.mplot3d import Axes3D
-from ripser import ripser, plot_dgms
-import torch
 import sys
 import warnings
 from DiffusionMaps import *

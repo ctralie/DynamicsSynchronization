@@ -1,8 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.io as sio
-import torch
-from kymatio import Scattering2D
 from scipy import interpolate
 from scipy.ndimage.filters import gaussian_filter1d as gf1d
 from sklearn.decomposition import PCA
@@ -173,6 +171,8 @@ def get_scattering(patches, pd, J=4, L=8, rotinvariant=True):
 
     that invariance will bring the number of orientations from L*L to L
     """
+    import torch
+    from kymatio import Scattering2D
     #dim = max(pd[0], pd[1])
     #dim = int(2**np.ceil(np.log(dim)/np.log(2)))
     dim = pd[0]

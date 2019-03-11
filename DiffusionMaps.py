@@ -83,6 +83,34 @@ def getTorusKnot(N, p, q):
     X[:, 2] = -np.sin(q*t)
     return X
 
+
+def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True, neigs=4, mask=np.array([])):
+    c = plt.get_cmap('magma_r')
+    C2 = c(np.array(np.round(255.0*Xs/np.max(Xs)), dtype=np.int32))
+    C2 = C2[:, 0:3]
+    
+    t = dMaxSqrCoeff*np.max(DSqr)*0.001
+    print("t = %g"%t)
+    print("Doing diffusion maps on %i points"%(DSqr.shape[0]))
+    tic = time.time()
+    Y = getDiffusionMap(DSqr, t, distance_matrix=True, neigs=neigs, thresh=1e-10, mask=mask)
+    Y = np.fliplr(Y)
+    print("Elapsed Time: %.3g"%(time.time()-tic))
+    Y = Y[:, 1::]
+
+    if do_plot:
+        plt.figure(figsize=(12, 6))
+        ax = plt.gcf().add_subplot(121, projection='3d')
+        ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=C2)
+        plt.title("Diffusion Maps By Space")
+        plt.subplot(122)
+        DShow = np.array(DSqr)
+        DShow[DShow < 0] = 0
+        DShow = np.sqrt(DShow)
+        DShow[mask == 0] = np.nan
+        plt.imshow(DShow)
+    return Y
+
 if __name__ == '__main__':
     zeroReturn = True
     N = 400

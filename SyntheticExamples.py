@@ -203,14 +203,18 @@ def testICP():
         plt.title("Difference (MSE=%.3g)"%(np.mean((D1-D2)**2)))
         plt.savefig("ICP%i.png"%i, bbox_inches='tight')
 
-if __name__ == '__main__':
-    testICP()
+def testCylinderMahalanobis():
+    pde = TorusDist(35, 100, (0.2, 0.2), alpha_phi=0); nsamples=(1, 500); kappa=1
+    testMahalanobis(pde, pd=(25, 25), nsamples=nsamples, \
+                    dMaxSqr=1, delta=3, d=1, kappa=kappa,\
+                    periodic=False, rotate=False, do_mahalanobis=True, do_plot=True)
 
-if __name__ == '__main__2':
-    #pde = Parabaloid(100, 100)
-    #pde = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=2); nsamples=(30, 30); kappa=0.05
-    #pde = TorusDist(35, 100, (0.2, 0.2), alpha_phi=0); nsamples=(1, 500); kappa=0.2
+def testTorusMahalanobis():
     np.random.seed(6); pde = TorusMultiDist(50, 100, 2, tile_y=2); nsamples=(30, 30); kappa=0.2
     testMahalanobis(pde, pd=(25, 25), nsamples=nsamples, \
                     dMaxSqr=1, delta=3, d=3, kappa=kappa,\
                     periodic=True, rotate=False, do_mahalanobis=True, do_plot=True)
+
+if __name__ == '__main__':
+    testCylinderMahalanobis()
+

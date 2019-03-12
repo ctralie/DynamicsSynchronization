@@ -387,7 +387,7 @@ class PDE2D(object):
     def makeVideo(self, Y, D = np.array([]), skip=20, cmap='magma_r'):
         """
         Make a video given a nonlinear dimension reduction, which
-        is assumed to be parallel to the patches
+        is assumed to be indexed parallel to the patches
         """
         colorvar = self.Xs
         c = plt.get_cmap(cmap)

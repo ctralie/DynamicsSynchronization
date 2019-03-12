@@ -255,9 +255,58 @@ class PDE3D(object):
 
 
 
-    def makeVideo(self, Y, D = np.array([]), skip=20, cmap='magma_r'):
+    def makeVideo(self, Y, D = np.array([]), skip=1, cmap='magma_r', plot_boundaries=True, colorvar=np.array([])):
         """
         Make a video given a nonlinear dimension reduction, which
-        is assumed to be parallel to the patches
+        is assumed to be indexed parallel to the patches
         """
-        pass
+        if colorvar.size == 0:
+            colorvar = self.Xs
+        c = plt.get_cmap(cmap)
+        C = c(np.array(np.round(255.0*colorvar/np.max(colorvar)), dtype=np.int32))
+        C = C[:, 0:3]
+        sprefix = 120
+        if D.size > 0:
+            fig = plt.figure(figsize=(18, 6))
+            sprefix = 130
+        else:
+            fig = plt.figure(figsize=(12, 6))
+        I, Ts, Xs, Ys = self.I, self.Ts, self.Xs, self.Ys
+
+        idx = 0
+        N = Y.shape[0]
+        for i in range(0, N, skip):
+            t = int(np.round(self.Ts[i]))
+            plt.clf()
+            plt.subplot(sprefix+1)
+            self.draw_frame(t)
+            if plot_boundaries:
+                self.plotPatchBoundary(i)
+            plt.title("Frame %i Patch %i"%(t, i))
+
+            if Y.shape[1] == 3:
+                ax = plt.gcf().add_subplot(sprefix+2, projection='3d')
+                ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=np.array([[0, 0, 0, 0]]))
+                ax.scatter(Y[0:i+1, 0], Y[0:i+1, 1], Y[0:i+1, 2], c=C[0:i+1, :])
+                ax.scatter(Y[i, 0], Y[i, 1], Y[i, 2], 'r')
+            else:
+                plt.subplot(sprefix+2)
+                plt.scatter(Y[:, 0], Y[:, 1], 100, c=np.array([[0, 0, 0, 0]]))
+                plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C[0:i+1, :])
+                plt.scatter(Y[i, 0], Y[i, 1], 40, 'r')
+                plt.axis('equal')
+                ax = plt.gca()
+                ax.set_facecolor((0.15, 0.15, 0.15))
+                ax.set_xticks([])
+                ax.set_yticks([])
+            if D.size > 0:
+                plt.subplot(133)
+                plt.imshow(D, cmap='magma_r', interpolation='none')
+
+                plt.plot([i, i], [0, N], 'c')
+                plt.plot([0, N], [i, i], 'c')
+                plt.xlim([0, N])
+                plt.ylim([N, 0])
+
+            plt.savefig("%i.png"%idx)
+            idx += 1

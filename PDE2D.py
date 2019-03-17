@@ -10,6 +10,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import sys
 import warnings
 from DiffusionMaps import *
+from Mahalanobis import *
 from LocalPCA import *
 from PatchDescriptors import *
 
@@ -50,6 +51,7 @@ class PDE2D(object):
     def __init__(self):
         self.I = np.array([[]])
         self.periodic = True
+        self.mc = None
 
     def drawSolutionImage(self):
         plt.imshow(self.I, interpolation='none', aspect='auto', cmap='RdGy')
@@ -208,127 +210,54 @@ class PDE2D(object):
         patches = np.reshape(patches, ts.shape)
         self.patches = f_patch(f_pointwise(patches))
 
-    def getMahalanobisDists(self, delta, n_points, d = -10, maxeig = 10, kappa = 1):
+    def get_mahalanobis_ellipsoid(self, idx, delta, n_points):
+        # function(ndarray(d) x0, int idx, float delta, int n_points) -> ndarray(n_points, d)
         """
-        Compute the Mahalanobis distance between all pairs of points
-        To quote from the Singer/Coifman paper:
-        "Suppose that we can identify which data points y (j ) belong to the 
-                ellipsoid E y (i) ,δ and which reside outside it"
-        Assume that an "equal space" ellipse is a disc of radius "delta"
-        in spacetime (since we are trying to find a map back to spacetime).  
-        Sample points uniformly at random within that disc, and
-        use observations centered at those points to compute Jacobian.
+        Return a centered ellipsoid
         Parameters
         ----------
+        idx: int
+            Index of patch around which to compute the ellipsoid
         delta: float
-            Spacetime radius from which to sample
+            Radius of circle in spacetime to sample in preimage
         n_points: int
-            Number of points to sample in the disc
-        d: int (default -10)
-            If >0, the dimension of the Jacobian.
-            If <0, then pick the dimension at which the eigengap
-            exceeds |d|
-        maxeig: int (default 10)
-            The maximum number of eigenvectors to compute
-            (should be at least d)
-        kappa: float
-            A number in [0, 1] indicating the proportion of mutual nearest
-            neighbors to use, in the original patch metric
+            Number of points to sample in the ellipsoid
+        Returns
+        -------
+        ellipsoid: ndarray(n_points, patchdim)
+            Centered ellipsoid around patch at index idx
         """
-        if maxeig < d:
-            warnings.warn("maxeig = %i < d = %i"%(maxeig, d))
-        dim = self.patches.shape[1] #The dimension of each patch
-        maxeig = min(maxeig, d)
-        maxeig = min(maxeig, dim)
-        
-        ## Step 1: Setup interpolator and observation functions
-        f_interp = self.getInterpolator()
         f_pointwise = self.f_pointwise
         f_patch = self.f_patch
-
-        ## Step 2: For each patch, sample near patches
-        ## and compute covariance matrix
-        pdx, pdt = np.meshgrid(even_interval(self.pd[1]), -even_interval(self.pd[0]))
-        pdx = pdx.flatten()
-        pdt = pdt.flatten()
-        N = self.patches.shape[0]
-
-        print("Computing Jacobians...")
-        tic = time.time()
-        ws = np.zeros((N, maxeig))
-        vs = np.zeros((N, dim, maxeig))
-        for i in range(N):
-            y = self.patches[i, :]
-            if i%100 == 0:
-                print("%i of %i"%(i, N))
-            x0 = self.Xs[i]
-            t0 = self.Ts[i]
-            # Sample centers of each neighboring patch
-            # in a circle around the original patch
-            thetasc = 2*np.pi*np.random.rand(n_points)
-            xc = x0 + delta*np.cos(thetasc)
-            tc = t0 + delta*np.sin(thetasc)
-            # Randomly rotate each patch
-            thetasorient = np.zeros(n_points)
-            if self.rotate_patches:
-                thetasorient = 2*np.pi*np.random.rand(n_points)
-            cs = np.cos(thetasorient)
-            ss = np.sin(thetasorient)
-            xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdt[None, :] + xc[:, None]
-            ts = ss[:, None]*pdx[None, :] + cs[:, None]*pdt[None, :] + tc[:, None]
-            patches = f_interp(ts.flatten(), xs.flatten(), grid=False)
-            patches = np.reshape(patches, (n_points, pdx.size))
-            patches = f_patch(f_pointwise(patches))
-            Y = patches - y[None, :] # Center samples
-            C = (Y.T).dot(Y)
-            w, v = slinalg.eigh(C, eigvals=(C.shape[1]-maxeig, C.shape[1]-1))
-            # Put largest eigenvectors first
-            w = w[::-1]
-            v = np.fliplr(v)
-            ws[i, :] = w
-            vs[i, :, :] = v
-        print("Elapsed Time: %.3g"%(time.time()-tic))
-        # Estimate dimension using eigengaps
-        if not (d == 1):
-            ratios = np.median(ws[:, 0:-1]/ws[:, 1::], 0)
-            d_est = np.argmax(np.sign(ratios+d)) + 1
-            print("d_est = %i"%d_est)
-            if d < 0:
-                d = d_est
-
-        ## Step 3: Compute squared Mahalanobis distance between
-        ## all pairs of points
-        gamma = np.zeros((N, N))
-        #Create a matrix whose ith row and jth column contains
-        #the dot product of patch i and eigenvector vjk
-        D = np.zeros((N, N, maxeig))
-        for k in range(maxeig):
-            D[:, :, k] = self.patches.dot(vs[:, :, k].T)
-        print("Computing Mahalanobis Distances...")
-        tic = time.time()
-        for k in range(maxeig):
-            Dk = D[:, :, k]
-            wk = ws[:, k]
-            Dk_diag = np.diag(Dk)
-            gamma += (Dk_diag[:, None] - Dk.T)**2/wk[:, None]
-            gamma += (Dk - Dk_diag[None, :])**2/wk[None, :]
-        gamma *= 0.5*(delta**2)/(maxeig+2)
-        print("Elapsed Time: %.3g"%(time.time()-tic))
-
-        ## Step 4: Make distances infinity between points
-        ## that are not mutual nearest neighbors in the original metric
-        mask = np.ones((N, N))
-        if kappa < 1:
-            NNeighbs = int(np.floor(kappa*N))
-            D = np.sum(self.patches**2, 1)[:, None]
-            DSqr = D + D.T - 2*self.patches.dot(self.patches.T)
-            J = np.argpartition(DSqr, NNeighbs, 1)[:, 0:NNeighbs]
-            I = np.tile(np.arange(N)[:, None], (1, NNeighbs))
-            V = np.ones(I.size)
-            [I, J] = [I.flatten(), J.flatten()]
-            mask = sparse.coo_matrix((V, (I, J)), shape=(N, N))
-            mask = mask.toarray()
-        return {'gamma':gamma, 'mask':mask}
+        ## Step 2: For each patch, sample near patches in a disc
+        if not self.mc:
+            # Cache patch coordinates and interpolator
+            pdx, pdt = np.meshgrid(even_interval(self.pd[1]), -even_interval(self.pd[0]))
+            pdx = pdx.flatten()
+            pdt = pdt.flatten()
+            f_interp = self.getInterpolator()
+            self.mc = {'pdx':pdx, 'pdt':pdt, 'f_interp':f_interp}
+        pdx, pdt, f_interp = self.mc['pdx'], self.mc['pdt'], self.mc['f_interp']
+        y = self.patches[idx, :]
+        x0 = self.Xs[idx]
+        t0 = self.Ts[idx]
+        # Sample centers of each neighboring patch
+        # in a disc around the original patch
+        xc = x0 + delta*np.random.randn(n_points)
+        tc = t0 + delta*np.random.randn(n_points)
+        # Randomly rotate each patch
+        thetasorient = np.zeros(n_points)
+        if self.rotate_patches:
+            thetasorient = 2*np.pi*np.random.rand(n_points)
+        cs = np.cos(thetasorient)
+        ss = np.sin(thetasorient)
+        xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdt[None, :] + xc[:, None]
+        ts = ss[:, None]*pdx[None, :] + cs[:, None]*pdt[None, :] + tc[:, None]
+        patches = f_interp(ts.flatten(), xs.flatten(), grid=False)
+        patches = np.reshape(patches, (n_points, pdx.size))
+        # Apply function and center samples
+        Y = f_patch(f_pointwise(patches)) - y[None, :]
+        return Y
 
     
     def plotPatchBoundary(self, i, draw_arrows=True):
@@ -440,7 +369,3 @@ class PDE2D(object):
 
             plt.savefig("%i.png"%idx)
             idx += 1
-
-
-
-

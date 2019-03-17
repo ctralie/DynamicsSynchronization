@@ -6,6 +6,7 @@ import sklearn.feature_extraction.image as skimage
 import time
 from scipy import interpolate
 import scipy.sparse as sparse
+import scipy.misc
 from mpl_toolkits.mplot3d import Axes3D
 import sys
 import warnings
@@ -41,6 +42,8 @@ class PDE3D(object):
         self.I = np.array([[]])
         self.periodic_x = False
         self.periodic_y = False
+        self.f_pointwise = lambda x: x
+        self.f_patch = lambda x: x
 
     def draw_frame(self, i):
         plt.imshow(self.I[i, :, :], interpolation='none', aspect='auto', cmap='RdGy')
@@ -68,6 +71,9 @@ class PDE3D(object):
             y = y.flatten()
             I = np.concatenate((I, I, I), 2)
         return interpolate.RegularGridInterpolator((t, x, y), I, method="linear")
+
+    def makeObservationsTimeSeries(self, win, hop):
+        pass
 
     def makeObservations(self, pd, nsamples, uniform=True, periodic_x=False, periodic_y=False, rotate = False, \
                             buff = [0.0, 0.0, 0.0], f_pointwise = lambda x: x, f_patch = lambda x: x):
@@ -310,3 +316,118 @@ class PDE3D(object):
 
             plt.savefig("%i.png"%idx)
             idx += 1
+
+    def plot_complex_3d_hist(self, res, log_density=True):
+        """
+        Plot an evolving joint histogram of phase and magnitude
+        of each frame of the solution, with colors that make it
+        easy to see the preimage of the histogram on the domain
+        of the image
+        Parameters
+        ----------
+        res: int
+            Resolution of histogram
+        log_density: boolean
+            If true, plot the histogram on a log scale
+        """
+        if not (self.I.dtype == np.complex):
+            print("ERROR: Cannot make complex 3D histogram with dtype: %s"%np.dtype(self.I))
+            return
+        plt.figure(figsize=(12, 12))
+        anglebins = np.linspace(-np.pi, np.pi, res+1)
+        magbins = np.linspace(np.min(np.abs(self.I)), np.max(np.abs(self.I)), res+1)
+        Hs = []
+        for i in range(self.I.shape[0]):
+            frame = self.I[i, :, :]
+            x = frame.flatten()
+            xabs = np.abs(x)
+            xangle = np.arctan2(np.imag(x), np.real(x))
+            H, _, _ = np.histogram2d(xabs, xangle, bins=(magbins, anglebins))
+            Hs.append(H)
+        Hs = np.array(Hs)
+        hmin = np.min(Hs[Hs > 0])
+        hmax = np.max(Hs)
+        colors2d = sio.loadmat("colors2d.mat")["J"]
+        colors2d = scipy.misc.imresize(colors2d, (res, res))
+        C = np.reshape(colors2d, (res**2, 3))
+        colors2d = colors2d/255.0
+        pix = np.arange(res)
+        xx, yy = np.meshgrid(anglebins[0:-1], magbins[0:-1])
+        for i in range(self.I.shape[0]):
+            frame = self.I[i, :, :]
+            magframe = np.abs(frame)
+            angleframe = np.arctan2(np.imag(frame), np.real(frame))
+            frameidx_mag = np.digitize(magframe, magbins)-1
+            frameidx_angle = np.digitize(angleframe, anglebins)-1
+            frameidx_mag[frameidx_mag>=res] = res-1
+            frameidx_angle[frameidx_mag>=res] = res-1
+            idx = np.ravel_multi_index((frameidx_mag, frameidx_angle), dims=(res, res))
+            cs = C[idx, :]
+            cs = np.reshape(cs, (frame.shape[0], frame.shape[1], 3))
+            H = Hs[i, :, :]
+            plt.clf()
+            plt.subplot(221)
+            plt.imshow(magframe, vmin=magbins[0], vmax=magbins[-1], cmap='RdGy')
+            plt.title("Magnitude")
+            plt.subplot(222)
+            plt.imshow(angleframe, vmin=-np.pi, vmax=np.pi, cmap='hsv')
+            plt.title("Angle")
+            ax = plt.gcf().add_subplot(223, projection='3d')
+            if log_density:
+                H[H == 0] = hmin
+                H = np.log(H/hmin)
+            ax.plot_surface(xx, yy, H, facecolors=colors2d)
+            ax.set_xlabel("Angle")
+            ax.set_ylabel("Magnitude")
+            if log_density:
+                ax.set_zlabel("Log Density")
+            else:
+                ax.set_zlabel("Density")
+            plt.title("Histogram")
+            plt.subplot(224)
+            plt.imshow(cs)
+            plt.title("Activity Mapping")
+            plt.savefig("3DHist%i.png"%i)
+    
+    def plot_complex_distribution(self, res=50):
+        if not (self.I.dtype == np.complex):
+            print("ERROR: Cannot make complex distribution with dtype: %s"%np.dtype(self.I))
+            return
+        magrange = [np.min(np.abs(self.I)), np.max(np.abs(self.I))]
+        realrange = [np.min(np.real(self.I)), np.max(np.real(self.I))]
+        imagrange = [np.min(np.imag(self.I)), np.max(np.imag(self.I))]
+        anglebins = np.linspace(-np.pi, np.pi, res+1)
+        magbins = np.linspace(np.min(np.abs(self.I)), np.max(np.abs(self.I)), res+1)
+        plt.figure(figsize=(18, 6))
+        for i in range(self.I.shape[0]):
+            frame = self.I[i, :, :]
+            x = frame.flatten()
+            xabs = np.abs(x)
+            xangle = np.arctan2(np.imag(x), np.real(x))
+            H, _, _ = np.histogram2d(xabs, xangle, bins=(magbins, anglebins))
+            ii, jj = np.unravel_index(np.argmax(H), H.shape)
+            realmax = magbins[ii]*np.cos(anglebins[jj])
+            imagmax = magbins[ii]*np.sin(anglebins[jj])
+            magmax = magbins[ii]
+            print([realmax, imagmax, magmax])
+
+
+            magframe = np.abs(frame)
+            angleframe = np.arctan2(np.imag(frame), np.real(frame))
+            plt.clf()
+            plt.subplot(131)
+            plt.imshow(magframe, vmin=magrange[0], vmax=magrange[-1], cmap='RdGy')
+            plt.title("Magnitude")
+            plt.subplot(132)
+            plt.imshow(angleframe, vmin=-np.pi, vmax=np.pi, cmap='hsv')
+            plt.title("Angle")
+            ax = plt.gcf().add_subplot(133, projection='3d')
+            ax.scatter(np.real(x), np.imag(x), np.abs(x), s=5, zorder=1)
+            ax.scatter([realmax], [imagmax], [magmax], s=100, zorder=2)
+            ax.set_xlim(realrange)
+            ax.set_xlabel("Real")
+            ax.set_ylim(imagrange)
+            ax.set_ylabel("Imag")
+            ax.set_zlim(magrange)
+            ax.set_zlabel("Magnitude")
+            plt.savefig("ComplexDist%i.png"%i, bbox_inches='tight')

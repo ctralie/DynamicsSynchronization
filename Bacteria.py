@@ -14,7 +14,7 @@ class Bacteria(PDE3D):
         I = rgb2gray(I)[:, :, 0]
         self.I = np.reshape(I, (I.shape[0], IDims[0], IDims[1]))
 
-if __name__ == '__main__':
+def make_equalized_video():
     equalize = True
     for i in range(1, 3700):
         I = mpimage.imread("bacteria/%i.png"%i)
@@ -28,3 +28,6 @@ if __name__ == '__main__':
         C = C[:, 0:3]
         C = np.reshape(C, (I.shape[0], I.shape[1], 3))
         mpimage.imsave("%i.png"%i, C)
+
+if __name__ == '__main__':
+    make_equalized_video()

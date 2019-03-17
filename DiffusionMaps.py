@@ -19,7 +19,7 @@ def getSSM(X):
     D = np.sqrt(D)
     return D
 
-def getDiffusionMap(X, eps, distance_matrix=False, neigs = 4, thresh=1e-10, mask = np.array([])):
+def getDiffusionMap(X, eps, distance_matrix=False, neigs=4, thresh=1e-10, mask=np.array([]), flip=True):
     """
     Perform diffusion maps with a unit timestep, automatically
     normalizing for nonuniform sampling
@@ -64,7 +64,11 @@ def getDiffusionMap(X, eps, distance_matrix=False, neigs = 4, thresh=1e-10, mask
     # Solve a generalized eigenvalue problem
     w, v = sparse.linalg.eigsh(KHat, k=neigs, M=M, which='LM')
     print("Elapsed Time: %.3g"%(time.time()-tic))
-    return w[None, :]*v
+    Y = w[None, :]*v
+    if flip:
+        Y = np.fliplr(Y)
+        Y = Y[:, 1::]
+    return Y
 
 
 def getPinchedCircle(N):
@@ -94,9 +98,7 @@ def doDiffusionMaps(DSqr, Xs, dMaxSqrCoeff = 1.0, do_plot = True, neigs=4, mask=
     print("Doing diffusion maps on %i points"%(DSqr.shape[0]))
     tic = time.time()
     Y = getDiffusionMap(DSqr, t, distance_matrix=True, neigs=neigs, thresh=1e-10, mask=mask)
-    Y = np.fliplr(Y)
     print("Elapsed Time: %.3g"%(time.time()-tic))
-    Y = Y[:, 1::]
 
     if do_plot:
         plt.figure(figsize=(12, 6))

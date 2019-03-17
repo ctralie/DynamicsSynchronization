@@ -6,12 +6,13 @@ from PDE3D import *
 from PatchDescriptors import *
 from DiffusionMaps import *
 import matplotlib.image as mpimage
+import matplotlib.colors as colors
+
 
 class GL2DSimulation(PDE3D):
-    def __init__(self):
-        res = sio.loadmat("cgle_2d.mat")
-        I = np.real(res["data"])
-        self.I = I
+    def __init__(self, suffix='', summary = lambda x: x):
+        res = sio.loadmat("cgle_2d%s.mat"%suffix)
+        self.I = summary(res["data"])
 
     def saveFrames(self):
         vmin = np.min(self.I)
@@ -33,6 +34,7 @@ class GL2DSimulation(PDE3D):
         Y = doDiffusionMaps(DSqr, X[:, 0], dMaxSqrCoeff=0.6, do_plot=False)
         plt.scatter(Y[:, 0], Y[:, 1], c=X[:, 0])
         plt.show()
+
 
 
 
@@ -76,5 +78,10 @@ def testRecoverSquareTimeSeries():
 if __name__ == '__main__':
     #testFullFrameStack()
     #testRecoverSquareTimeSeries()
-    gl = GL2DSimulation()
-    gl.get_timeseries()
+
+    #gl = GL2DSimulation('_locturb', summary=np.abs)
+    #gl.saveFrames()
+
+    gl = GL2DSimulation('_locturb')
+    #gl.plot_complex_3d_hist(res=50)
+    gl.plot_complex_distribution()

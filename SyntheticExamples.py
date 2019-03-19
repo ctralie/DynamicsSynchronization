@@ -99,7 +99,7 @@ class TorusMultiDist(PDE2D):
 
 
 
-def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 1, delta=2, rotate=False, do_mahalanobis=True, rank=2, jacfac=1.0, maxeigs=2, periodic=False, cmap='magma_r', do_plot=False):
+def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, delta=2, rotate=False, do_mahalanobis=True, rank=2, jacfac=1.0, maxeigs=2, periodic=False, cmap='magma_r', do_plot=False):
     f_patch = lambda x: x
     if rotate:
         f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
@@ -108,6 +108,8 @@ def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 1, delta=2,
     #f_patch = lambda patches: get_ftm2d_polar(patches, pd)
 
     pde.makeObservations(pd=pd, nsamples=nsamples, periodic=periodic, buff=delta, rotate=rotate, f_patch=f_patch)
+    if not (type(nsamples) is tuple):
+        pde.resort_byraster()
     Xs = pde.Xs
     Ts = pde.Ts
     N = Xs.size
@@ -124,7 +126,7 @@ def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 1, delta=2,
 
     D = np.sqrt(DSqr)
     D[mask == 0] = np.inf
-    Y = doDiffusionMaps(DSqr, Xs, dMaxSqr, do_plot=False, mask=mask, neigs=6)
+    Y = doDiffusionMaps(DSqr, Xs, dMaxSqr, do_plot=False, mask=mask, neigs=8)
 
     if do_plot:
         fig = plt.figure(figsize=(18, 6))
@@ -150,78 +152,78 @@ def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 1, delta=2,
     
     return Y
 
-def testICP():
-    maxeigs=40
-    delta=3
-    jacfac=1
-    dMaxSqr=10
+def testICP(noisefac = 0.001, maxeigs=40, delta=3, jacfac=1, dMaxSqr=10, \
+            nsamples1 = (30, 30), nsamples2 = (30, 30), \
+            pd1 = (25, 25), pd2 = (25, 25), initial_guesses=10):
     pde1 = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=2)
-    pde1.I += 0.00*np.random.randn(pde1.I.shape[0], pde1.I.shape[1])
-    Y1 = testMahalanobis(pde1, pd=(25, 25), nsamples=(30, 30), \
+    pde1.I += noisefac*np.random.randn(pde1.I.shape[0], pde1.I.shape[1])
+    Y1 = testMahalanobis(pde1, pd=pd1, nsamples=nsamples1, \
                     dMaxSqr=dMaxSqr, delta=delta, rank=2, \
                     maxeigs=maxeigs, jacfac=jacfac,\
                     periodic=True, rotate=False, do_mahalanobis=True)
     pde2 = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=1)
-    pde2.I += 0.00*np.random.randn(pde2.I.shape[0], pde2.I.shape[1])
-    Y2 = testMahalanobis(pde2, pd=(25, 25), nsamples=(30, 30), \
+    pde2.I += noisefac*np.random.randn(pde2.I.shape[0], pde2.I.shape[1])
+    Y2 = testMahalanobis(pde2, pd=pd2, nsamples=nsamples2, \
                     dMaxSqr=dMaxSqr, delta=delta, rank=2, \
                     maxeigs=maxeigs, jacfac=jacfac,\
                     periodic=True, rotate=False, do_mahalanobis=True)
-    
+    dim = Y2.shape[1]
     D1 = getSSM(Y1)
     D2 = getSSM(Y2)
     vmax = max(np.max(D1), np.max(D2))
-    plt.figure(figsize=(15, 10))
-    plt.subplot(231)
+    plt.figure(figsize=(10, 10))
+    plt.subplot(221)
     pde1.drawSolutionImage()
     plt.title("Observation 1")
-    plt.subplot(232)
+    plt.subplot(222)
     pde2.drawSolutionImage()
     plt.title("Observation 2")
-    plt.subplot(234)
+    plt.subplot(223)
     plt.imshow(D1, cmap='magma_r', vmin=0, vmax=vmax)
     plt.colorbar()
-    plt.subplot(235)
+    plt.subplot(224)
     plt.imshow(D2, cmap='magma_r', vmin=0, vmax=vmax)
-    plt.colorbar()
-    plt.subplot(236)
-    plt.imshow(D1-D2,cmap='magma_r')
-    plt.title("Difference")
     plt.colorbar()
     plt.savefig("Observations.png", bbox_inches='tight')
 
+    
+    D1 = getSSM(Y1)
+    get_rmse = lambda idx: np.sqrt(np.mean((D1-getSSM(Y2[idx, :])**2)))
+    min_rmse = np.inf
+    idxsMin = []
+    for i in range(initial_guesses):
+        # Apply random rotation to y1 to change initial configuration
+        Y1 -= np.mean(Y1, 0)[None, :]
+        R, _, _ = np.linalg.svd(np.random.randn(dim, dim))
+        Y1 = Y1.dot(R)
+        CxList, CyList, RxList, idxList = doICP(Y1.T, Y2.T, MaxIters=100)
+        rmse = get_rmse(idxList[-1])
+        print(rmse)
+        if rmse < min_rmse:
+            idxsMin = idxList
+    
     plt.figure(figsize=(15, 5))
-    #CxList, CyList, RxList, idxList = doICP(Y1.T, Y2.T, MaxIters=100)
-    idxList = [np.arange(Y1.shape[0])]
-    for i, idx in enumerate(idxList):
+    rmses = np.zeros(len(idxsMin))
+    for i, idx in enumerate(idxsMin):
+        D2 = getSSM(Y2[idx, :])
+        rmses[i] = get_rmse(idx)
+    
+    for i, idx in enumerate(idxsMin):
         plt.clf()
         idx = np.array(idx)
-        D1 = getSSM(pde1.patches)
-        D2 = getSSM(pde2.patches[idx, :])
-        """
-        plt.subplot(231)
-        plt.imshow(D1)
-        plt.title("D1 Raw")
-        plt.colorbar()
-        plt.subplot(232)
-        plt.imshow(D2)
-        plt.colorbar()
-        plt.title("D2 Raw Iter %i"%i)
-        plt.subplot(233)
-        plt.imshow(D1-D2)
-        plt.colorbar()
-        plt.title("Difference (MSE = %.3g)"%(np.mean((D1-D2)**2)))
-        """
-
         plt.subplot(231)
         plt.scatter(pde1.Xs, pde1.Ts, c=pde2.Xs[idx])
         plt.title("Xs")
         plt.subplot(232)
         plt.scatter(pde1.Xs, pde1.Ts, c=pde2.Ts[idx])
         plt.title("Ts")
+        plt.subplot(233)
+        plt.plot(rmses)
+        plt.scatter([i], [rmses[i]])
+        plt.xlabel("Iteration number")
+        plt.title("ICP Convergence")
+        plt.ylabel("RMSE")
 
-
-        D1 = getSSM(Y1)
         D2 = getSSM(Y2[idx, :])
         plt.subplot(234)
         plt.imshow(D1)
@@ -234,7 +236,7 @@ def testICP():
         plt.subplot(236)
         plt.imshow(D1-D2)
         plt.colorbar()
-        plt.title("Difference (MSE=%.3g)"%(np.mean((D1-D2)**2)))
+        plt.title("Difference (RMSE=%.3g)"%rmses[i])
         plt.tight_layout()
         plt.savefig("ICP%i.png"%i, bbox_inches='tight')
 
@@ -245,15 +247,17 @@ def testCylinderMahalanobis():
                     periodic=True, rotate=False, do_mahalanobis=True, do_plot=True)
 
 def testTorusMahalanobis():
-    #np.random.seed(6); pde = TorusMultiDist(50, 100, 2, tile_y=2); nsamples=(30, 30)
-    pde = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=1); nsamples=(30, 30)
+    np.random.seed(6); pde = TorusMultiDist(50, 100, 2, tile_y=2); nsamples=1000 #(30, 30)
+    #pde = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=1); nsamples=(30, 30)
+    noisefac = 0.001
+    pde.I += noisefac*np.random.randn(pde.I.shape[0], pde.I.shape[1])
     pde.drawSolutionImage()
     plt.show()
-    Y = testMahalanobis(pde, pd=(25, 25), nsamples=nsamples, \
-                    dMaxSqr=10, delta=3, rank=2, maxeigs=20, jacfac=1,\
+    testMahalanobis(pde, pd=(25, 25), nsamples=nsamples, \
+                    dMaxSqr=10, delta=3, rank=2, maxeigs=40, jacfac=1,\
                     periodic=True, rotate=False, do_mahalanobis=True, do_plot=True)
 
 if __name__ == '__main__':
     #testTorusMahalanobis()
     #testCylinderMahalanobis()
-    testICP()
+    testICP(nsamples1=1000, nsamples2=2000, noisefac = 0.001, maxeigs=60, delta=3, jacfac=1, dMaxSqr=1)

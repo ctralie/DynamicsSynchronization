@@ -102,7 +102,7 @@ def getProcrustesAlignment(X, Y, idx):
     R = U.dot(VT)
     return (Cx, Cy, R)    
 
-def doICP(X, Y, MaxIters):
+def doICP(X, Y, MaxIters, verbose=False):
     """
     The loop which ties together correspondence finding
     and procrustes alignment to implement the iterative closest points algorithm
@@ -155,5 +155,6 @@ def doICP(X, Y, MaxIters):
         CyList.append(Cy)
         RxList.append(Rx)
         idxList.append(idx)
-        print("Finished iteration %i"%i)
+        if verbose:
+            print("Finished iteration %i"%i)
     return (CxList, CyList, RxList, idxList)

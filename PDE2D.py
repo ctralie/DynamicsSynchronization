@@ -25,6 +25,33 @@ def even_interval(k):
     n = (k-1)/2
     return np.arange(k)-n
 
+def approximate_rasterorder(X, Y, resy = 20):
+    """
+    Given a set of X and Y coordinates corresponding to
+    a 2D point cloud, return an index list that visits the
+    coordinates approximately in raster order
+    Parameters
+    ----------
+    X: ndarray(N)
+        X coordinates
+    Y: ndarray(N)
+        Y coordinates
+    resy: int
+        Y resolution of the grid to which to rasterize points
+    Returns
+    -------
+    order: ndarray(N)
+        Approximate raster order of the coordinates
+    """
+    y = Y-np.min(Y)
+    y /= np.max(y)
+    y = np.round(y*resy)
+    idx = np.argsort(X)
+    idx = idx[np.argsort(y[idx], kind='stable')]
+    order = np.zeros(X.shape[0])
+    order[idx] = np.arange(X.shape[0])
+    return idx
+
 
 class PDE2D(object):
     """
@@ -32,8 +59,6 @@ class PDE2D(object):
     ----------
     I: ndarray(T, S)
         The full 2D PDE spacetime grid
-    ts: ndarray(T)
-        Times corresponding to each row of I
     patches: ndarray(N, d)
         An array of d-dimensional observations
     Xs: ndarray(N)
@@ -209,6 +234,13 @@ class PDE2D(object):
         patches = (f_interp(ts.flatten(), xs.flatten(), grid=False))
         patches = np.reshape(patches, ts.shape)
         self.patches = f_patch(f_pointwise(patches))
+
+    def resort_byraster(self, resy=20):
+        idx = approximate_rasterorder(self.Xs, self.Ts, resy)
+        self.Xs = self.Xs[idx]
+        self.Ts = self.Ts[idx]
+        self.thetas = self.thetas[idx]
+        self.patches = self.patches[idx, :]
 
     def get_mahalanobis_ellipsoid(self, idx, delta, n_points):
         # function(ndarray(d) x0, int idx, float delta, int n_points) -> ndarray(n_points, d)

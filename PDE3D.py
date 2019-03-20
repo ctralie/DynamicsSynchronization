@@ -40,10 +40,29 @@ class PDE3D(object):
     """
     def __init__(self):
         self.I = np.array([[]])
+        self.L = np.array([[]])
         self.periodic_x = False
         self.periodic_y = False
         self.f_pointwise = lambda x: x
         self.f_patch = lambda x: x
+
+    def compute_laplacian2D(self):
+        """
+        Estimate the (complex) slice-wise 2D Laplacian using a 9-stencil, 
+        assuming periodic boundary conditions
+        """
+        if self.L.size > 0:
+            # It's already been computed
+            return
+        self.L = np.zeros_like(self.I)
+        weights = {0:-10.0/3, 1:2.0/3, 2:1.0/6}
+        for t in range(self.L.shape[0]):
+            ft = self.I[t, :, :]
+            for di in [-1, 0, 1]:
+                for dj in [-1, 0, 1]:
+                    index = abs(di) + abs(dj)
+                    self.L[t, :, :] += weights[index]*np.roll(np.roll(ft, di, axis=0), dj, axis=1)
+
 
     def draw_frame(self, i):
         plt.imshow(self.I[i, :, :], interpolation='none', aspect='auto', cmap='RdGy')
@@ -333,6 +352,7 @@ class PDE3D(object):
         if not (self.I.dtype == np.complex):
             print("ERROR: Cannot make complex 3D histogram with dtype: %s"%np.dtype(self.I))
             return
+        self.compute_laplacian2D()
         plt.figure(figsize=(12, 12))
         anglebins = np.linspace(-np.pi, np.pi, res+1)
         magbins = np.linspace(np.min(np.abs(self.I)), np.max(np.abs(self.I)), res+1)
@@ -347,16 +367,18 @@ class PDE3D(object):
         Hs = np.array(Hs)
         hmin = np.min(Hs[Hs > 0])
         hmax = np.max(Hs)
-        colors2d = sio.loadmat("colors2d.mat")["J"]
+        colors2d = scipy.misc.imread("palettes/rotation_2dpalette.png")
         colors2d = scipy.misc.imresize(colors2d, (res, res))
+        colors2d = colors2d[:, :, 0:3]
         C = np.reshape(colors2d, (res**2, 3))
         colors2d = colors2d/255.0
         pix = np.arange(res)
         xx, yy = np.meshgrid(anglebins[0:-1], magbins[0:-1])
         for i in range(self.I.shape[0]):
             frame = self.I[i, :, :]
+            framel = self.L[i, :, :]
             magframe = np.abs(frame)
-            angleframe = np.arctan2(np.imag(frame), np.real(frame))
+            angleframe = np.arctan2(np.imag(framel), np.real(framel))
             frameidx_mag = np.digitize(magframe, magbins)-1
             frameidx_angle = np.digitize(angleframe, anglebins)-1
             frameidx_mag[frameidx_mag>=res] = res-1
@@ -377,8 +399,8 @@ class PDE3D(object):
                 H[H == 0] = hmin
                 H = np.log(H/hmin)
             ax.plot_surface(xx, yy, H, facecolors=colors2d)
-            ax.set_xlabel("Angle")
-            ax.set_ylabel("Magnitude")
+            ax.set_xlabel("Laplacian Angle")
+            ax.set_ylabel("W Magnitude")
             if log_density:
                 ax.set_zlabel("Log Density")
             else:
@@ -393,41 +415,43 @@ class PDE3D(object):
         if not (self.I.dtype == np.complex):
             print("ERROR: Cannot make complex distribution with dtype: %s"%np.dtype(self.I))
             return
+        self.compute_laplacian2D()
         magrange = [np.min(np.abs(self.I)), np.max(np.abs(self.I))]
-        realrange = [np.min(np.real(self.I)), np.max(np.real(self.I))]
-        imagrange = [np.min(np.imag(self.I)), np.max(np.imag(self.I))]
+        reLrange = [np.min(np.real(self.L)), np.max(np.real(self.L))]
+        imLrange = [np.min(np.imag(self.L)), np.max(np.imag(self.L))]
         anglebins = np.linspace(-np.pi, np.pi, res+1)
         magbins = np.linspace(np.min(np.abs(self.I)), np.max(np.abs(self.I)), res+1)
         plt.figure(figsize=(18, 6))
         for i in range(self.I.shape[0]):
             frame = self.I[i, :, :]
             x = frame.flatten()
+            frameL = self.L[i, :, :]
+            xl = frameL.flatten()
             xabs = np.abs(x)
-            xangle = np.arctan2(np.imag(x), np.real(x))
-            H, _, _ = np.histogram2d(xabs, xangle, bins=(magbins, anglebins))
+            xlangle = np.arctan2(np.imag(xl), np.real(xl))
+            H, _, _ = np.histogram2d(xabs, xlangle, bins=(magbins, anglebins))
             ii, jj = np.unravel_index(np.argmax(H), H.shape)
             realmax = magbins[ii]*np.cos(anglebins[jj])
             imagmax = magbins[ii]*np.sin(anglebins[jj])
             magmax = magbins[ii]
-            print([realmax, imagmax, magmax])
 
 
             magframe = np.abs(frame)
-            angleframe = np.arctan2(np.imag(frame), np.real(frame))
+            angleframe = np.arctan2(np.imag(frameL), np.real(frameL))
             plt.clf()
             plt.subplot(131)
             plt.imshow(magframe, vmin=magrange[0], vmax=magrange[-1], cmap='RdGy')
             plt.title("Magnitude")
             plt.subplot(132)
             plt.imshow(angleframe, vmin=-np.pi, vmax=np.pi, cmap='hsv')
-            plt.title("Angle")
+            plt.title("Laplacian Angle")
             ax = plt.gcf().add_subplot(133, projection='3d')
-            ax.scatter(np.real(x), np.imag(x), np.abs(x), s=5, zorder=1)
-            ax.scatter([realmax], [imagmax], [magmax], s=100, zorder=2)
-            ax.set_xlim(realrange)
-            ax.set_xlabel("Real")
-            ax.set_ylim(imagrange)
-            ax.set_ylabel("Imag")
+            ax.scatter(np.real(xl), np.imag(xl), np.abs(x), s=5, zorder=1)
+            #ax.scatter([realmax], [imagmax], [magmax], s=100, zorder=2)
+            ax.set_xlim(reLrange)
+            ax.set_xlabel("Real Lap")
+            ax.set_ylim(imLrange)
+            ax.set_ylabel("Imag Lap")
             ax.set_zlim(magrange)
             ax.set_zlabel("Magnitude")
             plt.savefig("ComplexDist%i.png"%i, bbox_inches='tight')

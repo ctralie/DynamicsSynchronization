@@ -11,6 +11,7 @@ import matplotlib.colors as colors
 
 class GL2DSimulation(PDE3D):
     def __init__(self, suffix='', summary = lambda x: x):
+        PDE3D.__init__(self)
         res = sio.loadmat("cgle_2d%s.mat"%suffix)
         self.I = summary(res["data"])
 
@@ -80,8 +81,7 @@ if __name__ == '__main__':
     #testRecoverSquareTimeSeries()
 
     #gl = GL2DSimulation('_locturb', summary=np.abs)
+    gl = GL2DSimulation('_custom')
     #gl.saveFrames()
-
-    gl = GL2DSimulation('_locturb')
     #gl.plot_complex_3d_hist(res=50)
     gl.plot_complex_distribution()

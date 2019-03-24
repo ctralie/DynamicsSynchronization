@@ -355,11 +355,14 @@ class PDE2D(object):
         C = c(np.array(np.round(255.0*colorvar/np.max(colorvar)), dtype=np.int32))
         C = C[:, 0:3]
         sprefix = 120
+        cols = 2
         if D.size > 0:
-            fig = plt.figure(figsize=(18, 6))
-            sprefix = 130
-        else:
-            fig = plt.figure(figsize=(12, 6))
+            cols += 1
+            sprefix += 10
+        if Y.shape[1] > 3:
+            cols += 1
+            sprefix += 10
+        fig = plt.figure(figsize=(6*cols, 6))
         I, Xs, Ts = self.I, self.Xs, self.Ts
 
         idx = 0
@@ -374,8 +377,17 @@ class PDE2D(object):
             plt.axis('equal')
             plt.xlim(0, I.shape[1])
             plt.ylim(I.shape[0], 0)
-
-            if Y.shape[1] == 3:
+            if Y.shape[1] == 2:
+                plt.subplot(sprefix+2)
+                plt.scatter(Y[:, 0], Y[:, 1], 100, c=np.array([[0, 0, 0, 0]]))
+                plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C[0:i+1, :])
+                plt.scatter(Y[i, 0], Y[i, 1], 40, 'r')
+                plt.axis('equal')
+                ax = plt.gca()
+                ax.set_facecolor((0.15, 0.15, 0.15))
+                ax.set_xticks([])
+                ax.set_yticks([])
+            elif Y.shape[1] == 3:
                 ax = plt.gcf().add_subplot(sprefix+2, projection='3d')
                 ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=np.array([[0, 0, 0, 0]]))
                 ax.scatter(Y[0:i+1, 0], Y[0:i+1, 1], Y[0:i+1, 2], c=C[0:i+1, :])
@@ -390,8 +402,17 @@ class PDE2D(object):
                 ax.set_facecolor((0.15, 0.15, 0.15))
                 ax.set_xticks([])
                 ax.set_yticks([])
+                plt.subplot(sprefix+3)
+                plt.scatter(Y[:, 2], Y[:, 3], 100, c=np.array([[0, 0, 0, 0]]))
+                plt.scatter(Y[0:i+1, 2], Y[0:i+1, 3], 20, c=C[0:i+1, :])
+                plt.scatter(Y[i, 2], Y[i, 3], 40, 'r')
+                plt.axis('equal')
+                ax = plt.gca()
+                ax.set_facecolor((0.15, 0.15, 0.15))
+                ax.set_xticks([])
+                ax.set_yticks([])
             if D.size > 0:
-                plt.subplot(133)
+                plt.subplot(1, cols, cols)
                 plt.imshow(D, cmap='magma_r', interpolation='none')
 
                 plt.plot([i, i], [0, N], 'c')

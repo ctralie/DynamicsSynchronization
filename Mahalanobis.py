@@ -23,7 +23,7 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
     ----------
     X: ndarray(N, d)
         An array of N points in d dimensions
-    fn_ellipsoid: function(ndarray(d) x0, int idx, float delta, int n_points) -> ndarray(n_points, d)
+    fn_ellipsoid: function(int idx, float delta, int n_points) -> ndarray(n_points, d)
         A function which returns a centered ellipsoid in X space which
         is the result of applying the map from a neighborhood of radius
         delta in the preimage.
@@ -420,8 +420,87 @@ def testMahalanobisSphere():
     plt.savefig("SphereDGMS.svg", bbox_inches='tight')
     
 
+"""###################################################
+              TIME SERIES EXAMPLE
+###################################################"""
+
+def getPulseTrain(NSamples, TMin, TMax, AmpMin, AmpMax):
+    """
+    Make a pulse train, possibly with some error
+    Parameters
+    ----------
+    NSamples: int
+        Total number of samples in the pulse train
+    TMin: float
+        Min period of a randomly varying period
+    TMax: float
+        Max period of a randomly varying period
+    AmpMin: float
+        Min amplitude of a randomly varying amplitude
+    AmpMax: float
+        Max amplitude of a randomly varying amplitude
+    Returns
+    -------
+    x: ndarray(N)
+        The pulse train time series
+    """
+    x = np.zeros(NSamples)
+    x[0] = 1
+    i = 0
+    while i < NSamples:
+        i += TMin + int(np.round(np.random.randn()*(TMax-TMin)))
+        if i >= NSamples:
+            break
+        x[i] = AmpMin + (AmpMax-AmpMin)*np.random.randn()
+    return x
+
+def convolveGaussAndAddNoise(x, gaussSigma, noiseSigma):
+    """
+    Smooth out the time series, then add Gaussian noise
+    Parameters
+    ----------
+    x: ndarray(N)
+        Time series
+    gaussSigma: float
+        Width of gaussian
+    noiseSigma: float
+        Standard deviation of noise
+    Returns
+    -------
+    y: ndarray(N)
+        The smoothed and noised time series
+    """
+    gaussSigma = int(np.round(gaussSigma*3))
+    g = np.exp(-(np.arange(-gaussSigma, gaussSigma+1, dtype=np.float64))**2/(2*gaussSigma**2))
+    y = np.convolve(x, g, 'same')
+    y = y + noiseSigma*np.random.randn(len(x))
+    return y
+
+def testMahalanobisTimeSeries():
+    from SlidingWindow import getSlidingWindowNoInterp, SlidingWindowAnimator
+    from sklearn.decomposition import PCA
+    x1 = getPulseTrain(1000, 160, 160, 1, 1)
+    x1 = convolveGaussAndAddNoise(x1, 2, 0.01)
+    x2 = np.zeros(x1.shape)
+    x2[80::] = getPulseTrain(920, 160, 160, 2, 2)
+    x2 = convolveGaussAndAddNoise(x2, 8, 0)
+    x = x1 + x2
+    x = x[200::]
+
+    win = 70
+    dim = 1
+    Tau = 1
+    dT = 1
+    X = getSlidingWindowNoInterp(x, win)
+    D = np.sum(X**2, 1)[:, None]
+    DSqr = D + D.T - 2*X.dot(X.T)
+    Y = doDiffusionMaps(DSqr, X[:, 0], dMaxSqrCoeff=100, do_plot=False)
+
+    fig = plt.figure(figsize=(12, 6))
+    a = SlidingWindowAnimator("MahalanobisTimeSeries_DiffusionMaps.mp4", fig, x, Y, dim, Tau, dT, hop=5)
 
 if __name__ == '__main__':
     #testMahalanobisCircle()
     #testMahalanobisMushroom()
-    testMahalanobisSphere()
+    #testMahalanobisSphere()
+    testMahalanobisTimeSeries()

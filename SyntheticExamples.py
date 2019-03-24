@@ -102,7 +102,8 @@ class TorusMultiDist(PDE2D):
 def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, delta=2, rotate=False, do_mahalanobis=True, rank=2, jacfac=1.0, maxeigs=2, periodic=False, cmap='magma_r', do_plot=False):
     f_patch = lambda x: x
     if rotate:
-        f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
+        #f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
+        f_patch = lambda patches: get_ftm2d_polar(patches, pd)
     #f_patch = get_pc_histograms
     #f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
     #f_patch = lambda patches: get_ftm2d_polar(patches, pd)
@@ -247,17 +248,17 @@ def testCylinderMahalanobis():
                     periodic=True, rotate=False, do_mahalanobis=True, do_plot=True)
 
 def testTorusMahalanobis():
-    np.random.seed(6); pde = TorusMultiDist(50, 100, 2, tile_y=2); nsamples=1000 #(30, 30)
+    np.random.seed(6); pde = TorusMultiDist(50, 100, 3, tile_y=2); nsamples=1000 #(30, 30)
     #pde = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=1); nsamples=(30, 30)
     noisefac = 0.001
     pde.I += noisefac*np.random.randn(pde.I.shape[0], pde.I.shape[1])
     pde.drawSolutionImage()
     plt.show()
     testMahalanobis(pde, pd=(25, 25), nsamples=nsamples, \
-                    dMaxSqr=10, delta=3, rank=2, maxeigs=40, jacfac=1,\
-                    periodic=True, rotate=False, do_mahalanobis=True, do_plot=True)
+                    dMaxSqr=10, delta=3, rank=2, maxeigs=40, jacfac=0.25,\
+                    periodic=True, rotate=True, do_mahalanobis=True, do_plot=True)
 
 if __name__ == '__main__':
-    #testTorusMahalanobis()
+    testTorusMahalanobis()
     #testCylinderMahalanobis()
-    testICP(nsamples1=1000, nsamples2=2000, noisefac = 0.001, maxeigs=60, delta=3, jacfac=1, dMaxSqr=1)
+    #testICP(nsamples1=1000, nsamples2=2000, noisefac = 0.001, maxeigs=60, delta=3, jacfac=1, dMaxSqr=1)

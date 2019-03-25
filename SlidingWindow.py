@@ -1,5 +1,5 @@
 import numpy as np
-import scipy.interpolate as interp
+from scipy.interpolate import InterpolatedUnivariateSpline
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -28,7 +28,7 @@ def drawLineColored(idx, x, C, ax = None):
 def getSlidingWindow(x, dim, Tau, dT):
     """
     Return a sliding window of a time series,
-    using arbitrary sampling.  Use spline interpolation
+    using arbitrary sampling.  Use linear interpolation
     to fill in values in windows not on the original grid
     Parameters
     ----------
@@ -48,15 +48,16 @@ def getSlidingWindow(x, dim, Tau, dT):
     N = len(x)
     NWindows = int(np.floor((N-dim*Tau)/dT))
     X = np.zeros((NWindows, dim))
-    idx = np.arange(N)
+    spl = InterpolatedUnivariateSpline(np.arange(N), x)
     for i in range(NWindows):
         idxx = dT*i + Tau*np.arange(dim)
         start = int(np.floor(idxx[0]))
         end = int(np.ceil(idxx[-1]))+2
+        # Only take windows that are within range
         if end >= len(x):
             X = X[0:i, :]
             break
-        X[i, :] = interp.spline(idx[start:end+1], x[start:end+1], idxx)
+        X[i, :] = spl(idxx)
     return X
 
 def getSlidingWindowNoInterp(x, dim):
@@ -151,13 +152,14 @@ class SlidingWindowAnimator(animation.FuncAnimation):
         tx = np.arange(len(x))
         tx[tx > np.max(t)] = np.max(t)
         Cx = c(np.array(np.round(255*tx/np.max(t)), dtype=np.int32))
+        Cx = Cx[:, 0:3]
         self.C = C[:, 0:3]
         self.xlims = get_lims(x[:, None], 0, 0.2)
 
 
         ax1 = fig.add_subplot(121)
         ax1.set_facecolor(self.bgcolor)
-        if Y.shape[1] == 3:
+        if Y.shape[1] >= 3:
             ax2 = fig.add_subplot(122, projection='3d')
             ax2.set_xlim(get_lims(Y, 0))
             ax2.set_ylim(get_lims(Y, 1))
@@ -189,7 +191,7 @@ class SlidingWindowAnimator(animation.FuncAnimation):
         self.save(filename, writer = writer)
 
     def _draw_frame(self, i):
-        print("Rendering frame %i of %i"%(i, self.n_frames))
+        print("Rendering frame %i of %i"%(i+1, self.n_frames))
         idxs = np.arange(i*self.hop, (i+1)*self.hop)
         i1 = self.dT*idxs[-1]
         i2 = i1 + self.Win

@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.io as sio
 import scipy.linalg as slinalg
+from scipy.interpolate import InterpolatedUnivariateSpline
 from sklearn.manifold import Isomap
 import matplotlib.pyplot as plt
 import time
@@ -424,6 +425,44 @@ def testMahalanobisSphere():
               TIME SERIES EXAMPLE
 ###################################################"""
 
+def getTimeSeriesEllipsoid(spl, N, X, Tau, dT, idx, delta, n_points):
+    """
+    Compute the ellipsoid of a small neighborhood of a sliding
+    window time series
+    Parameters
+    ----------
+    spl: InterpolatedUnivariateSpline
+        Spline to interpolate the original time series
+    N: int
+        Length of original time series
+    X: ndarray(M, dim)
+        Sliding window time series
+    Tau: float
+        Lag between samples in each window
+    dT: float
+        Lag between windows
+    idx: int
+        Index of window for which to compute ellipsoid
+    delta: float
+        Time radius of ellipsoid
+    n_points: int
+        Number of windows to take
+    Returns
+    -------
+    Y: ndarray(n_points, dim)
+        Centered ellipsoid in sliding window space, with
+        a maximum number of n_points (or fewer if it's 
+        near the boundary of the time series)
+    """
+    dim = X.shape[1]
+    ts = dT*idx + np.linspace(-delta, delta, n_points)
+    ts = ts[:, None] + (Tau*np.arange(dim))[None, :]
+    shape = ts.shape
+    ts = ts.flatten()
+    Y = np.reshape(spl(ts), shape)
+    Y -= X[idx, :]
+    return Y
+
 def getPulseTrain(NSamples, TMin, TMax, AmpMin, AmpMax):
     """
     Make a pulse train, possibly with some error
@@ -477,27 +516,70 @@ def convolveGaussAndAddNoise(x, gaussSigma, noiseSigma):
     return y
 
 def testMahalanobisTimeSeries():
-    from SlidingWindow import getSlidingWindowNoInterp, SlidingWindowAnimator
+    from SlidingWindow import getSlidingWindow, SlidingWindowAnimator
     from sklearn.decomposition import PCA
+    np.random.seed(0)
+
+    #"""
     x1 = getPulseTrain(1000, 160, 160, 1, 1)
-    x1 = convolveGaussAndAddNoise(x1, 2, 0.01)
+    x1 = convolveGaussAndAddNoise(x1, 2, 0)
     x2 = np.zeros(x1.shape)
-    x2[80::] = getPulseTrain(920, 160, 160, 2, 2)
+    x2[80::] = getPulseTrain(920, 160, 160, 4, 4)
     x2 = convolveGaussAndAddNoise(x2, 8, 0)
     x = x1 + x2
-    x = x[200::]
+    x = x[175::]
+    x += 0.001*np.random.randn(x.size)
+    #"""
 
-    win = 70
-    dim = 1
+    """
+    t = np.linspace(0, 8*np.pi, 400)
+    x = np.cos(t)
+    x += 0.001*np.random.randn(x.size)
+    """
+
+    dim = 50
     Tau = 1
-    dT = 1
-    X = getSlidingWindowNoInterp(x, win)
-    D = np.sum(X**2, 1)[:, None]
-    DSqr = D + D.T - 2*X.dot(X.T)
-    Y = doDiffusionMaps(DSqr, X[:, 0], dMaxSqrCoeff=100, do_plot=False)
+    dT = np.pi/3
+    X = getSlidingWindow(x, dim, Tau, dT)
 
+    do_mahalanobis = True
+    namestr = "mahalanobis"
+    if do_mahalanobis:
+        dMaxSqrCoeff = 1.0
+        # make mirror symmetric
+        y = np.concatenate((x[::-1], x, x[::-1]))
+        idx = np.arange(y.size)-x.size
+        spl = InterpolatedUnivariateSpline(idx, y)
+        fn_ellipsoid = lambda idx, delta, n_points: getTimeSeriesEllipsoid(spl, x.size, X, Tau, dT, idx, delta, n_points)
+        res = getMahalanobisDists(X, fn_ellipsoid, delta=7, n_points=100, \
+                                    rank=1, maxeigs=16, jacfac=0.5)
+        gamma = res["gamma"]
+        mask = res["mask"]
+        t = dMaxSqrCoeff*np.max(gamma)
+        tic = time.time()
+        Y = getDiffusionMap(gamma, t, mask=mask, distance_matrix=True, neigs=6, thresh=1e-10)
+        print("Elapsed Time Diffusion Maps: %.3g"%(time.time()-tic))
+
+        gammadisp = np.array(gamma)
+        gammadisp[mask == 0] = np.nan
+        plt.figure(figsize=(12, 12))
+        plt.subplot(221)
+        plt.plot(x)
+        plt.subplot(223)
+        plt.imshow(gamma)
+        plt.subplot(224)
+        plt.imshow(gammadisp)
+        ax = plt.gcf().add_subplot(2, 2, 2, projection='3d')
+        ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=np.arange(Y.shape[0]), cmap='Spectral')
+        plt.show()
+    else:
+        namestr = "DiffusionMaps"
+        D = np.sum(X**2, 1)[:, None]
+        DSqr = D + D.T - 2*X.dot(X.T)
+        Y = doDiffusionMaps(DSqr, X[:, 0], dMaxSqrCoeff=100, do_plot=False)
+    Y = Y[:, 0:2]
     fig = plt.figure(figsize=(12, 6))
-    a = SlidingWindowAnimator("MahalanobisTimeSeries_DiffusionMaps.mp4", fig, x, Y, dim, Tau, dT, hop=5)
+    a = SlidingWindowAnimator("MahalanobisTimeSeries_%s.mp4"%namestr, fig, x, Y, dim, Tau, dT, hop=2)
 
 if __name__ == '__main__':
     #testMahalanobisCircle()

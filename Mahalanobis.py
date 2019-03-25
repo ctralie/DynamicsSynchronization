@@ -537,7 +537,7 @@ def testMahalanobisTimeSeries():
     x += 0.001*np.random.randn(x.size)
     """
 
-    dim = 50
+    dim = 60
     Tau = 1
     dT = np.pi/3
     X = getSlidingWindow(x, dim, Tau, dT)
@@ -551,8 +551,8 @@ def testMahalanobisTimeSeries():
         idx = np.arange(y.size)-x.size
         spl = InterpolatedUnivariateSpline(idx, y)
         fn_ellipsoid = lambda idx, delta, n_points: getTimeSeriesEllipsoid(spl, x.size, X, Tau, dT, idx, delta, n_points)
-        res = getMahalanobisDists(X, fn_ellipsoid, delta=7, n_points=100, \
-                                    rank=1, maxeigs=16, jacfac=0.5)
+        res = getMahalanobisDists(X, fn_ellipsoid, delta=4, n_points=100, \
+                                    rank=1, maxeigs=10, jacfac=1)
         gamma = res["gamma"]
         mask = res["mask"]
         t = dMaxSqrCoeff*np.max(gamma)

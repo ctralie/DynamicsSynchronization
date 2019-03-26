@@ -7,6 +7,21 @@ import scipy
 import scipy.spatial
 from scipy.spatial import distance
 
+def getCSM(X, Y):
+    """
+    Get the cross-similarity matrix between X and Y
+    Parameters
+    ----------
+    X: ndarray(d, M)
+        First point cloud
+    Y: ndarray(d, N)
+        Second point cloud
+    """
+    XSqr = np.sum(X**2, 0)
+    YSqr = np.sum(Y**2, 0)
+    DSqr = XSqr[:, None] + YSqr[None, :] - 2*X.T.dot(Y)
+    DSqr[DSqr < 0] = 0
+    return np.sqrt(DSqr)
 
 def getCentroid(PC):
     """
@@ -51,15 +66,7 @@ def getCorrespondences(X, Y, Cx, Cy, Rx):
     #Center, then rotate the X points by the estimated rotation to bring X to Y
     XC = X - Cx
     XC = np.dot(Rx, XC)
-    #Make a column vector of the dot product of the centered X points with themselves
-    dotX = np.sum(XC**2, 0)[:, None]
-    #Make a row vector of the dot product of the centered Y points with themselves
-    dotY = np.sum(YC**2, 0)[None, :]
-    #Use the formula that the squared Euclidean distance between XC^i and YC^j
-    #is XC^i dot XC^i + YC^j dot YC^j - 2XC^i dot YC^j
-    #And use broadcasting to repeat the column of XC dot XC across the entire
-    #matrix and the row of YC dot YC down the entire matrix
-    D = dotX + dotY - 2*XC.T.dot(YC)
+    D = getCSM(XC, YC)
     idx = np.argmin(D, 1) #Find index of closest point in Y to point in X
     return idx
 
@@ -158,3 +165,37 @@ def doICP(X, Y, MaxIters, verbose=False):
         if verbose:
             print("Finished iteration %i"%i)
     return (CxList, CyList, RxList, idxList)
+
+def get_rotation_lowrank(X, Y):
+    """
+    Handle the case where there may or may not be 
+    enough correspondences to determine a full rank
+    rotation from X to Y
+    Parameters
+    ----------
+    X: ndarray(d, M)
+        First point cloud
+    Y: ndarray(d, M)
+        Second point cloud
+    Returns
+    -------
+    Cx, Cy: ndarray(d), ndarray(d)
+        Centroids of point clouds
+    U, S, VT: ndarray(d, d), ndarray(d), ndarray(d, d)
+        Singular value decomposition
+    rank: int
+        Estimated rank of SVD
+    """
+    dim = X.shape[0]
+    R, _, _ = np.linalg.svd(np.random.randn(dim, dim))
+    Y = R.dot(X)
+    Cx = getCentroid(X)
+    Cy = getCentroid(Y)
+    XC = X - Cx
+    YC = Y - Cy
+    Cov = YC.dot(XC.T)
+    (U, S, VT) = np.linalg.svd(Cov)
+    eps = np.finfo(Cov.dtype).eps
+    thresh = eps*S.max()*max(Cov.shape)
+    rank = int(np.sum(S > thresh))
+    return Cx.flatten(), Cy.flatten(), U, VT, rank

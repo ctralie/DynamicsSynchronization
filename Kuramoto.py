@@ -14,6 +14,7 @@ class KSSimulation(PDE2D):
         I = res["data"]
         if not (scale == 1.0):
             I = resize(I, (I.shape[0]*scale, I.shape[1]*scale), anti_aliasing=True, mode='reflect')
+        print(I.shape)
         self.I = I
         self.ts = np.linspace(res["tmin"].flatten(), res["tmax"].flatten(), I.shape[0])
     

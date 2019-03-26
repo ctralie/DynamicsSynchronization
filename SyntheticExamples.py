@@ -155,7 +155,12 @@ def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, delta=2
 
 def testICP(noisefac = 0.001, maxeigs=40, delta=3, jacfac=1, dMaxSqr=10, \
             nsamples1 = (30, 30), nsamples2 = (30, 30), \
-            pd1 = (25, 25), pd2 = (25, 25), initial_guesses=10):
+            pd1 = (25, 25), pd2 = (25, 25), \
+            n_correspondences = 0, initial_guesses = 10, seed=0):
+    """
+    Align a set of observations to another set of observations using ICP
+    """
+    np.random.seed(seed)
     pde1 = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=2)
     pde1.I += noisefac*np.random.randn(pde1.I.shape[0], pde1.I.shape[1])
     Y1 = testMahalanobis(pde1, pd=pd1, nsamples=nsamples1, \
@@ -186,30 +191,75 @@ def testICP(noisefac = 0.001, maxeigs=40, delta=3, jacfac=1, dMaxSqr=10, \
     plt.imshow(D2, cmap='magma_r', vmin=0, vmax=vmax)
     plt.colorbar()
     plt.savefig("Observations.png", bbox_inches='tight')
-
     
     D1 = getSSM(Y1)
     get_rmse = lambda idx: np.sqrt(np.mean((D1-getSSM(Y2[idx, :])**2)))
+
+    if n_correspondences > 0:
+        # If some correspondences are provided, use them
+        # to help come up with a good initial guess
+        # Here, just simulate choosing the correspondences
+        x1 = np.concatenate((pde1.Xs[:, None], pde1.Ts[:, None]), 1)
+        x2 = np.concatenate((pde2.Xs[:, None], pde2.Ts[:, None]), 1)
+        C = getCSM(x1.T, x2.T)
+        idx1 = np.random.permutation(x1.shape[0])[0:n_correspondences]
+        idx2 = np.argmin(C[idx1, :], axis=1)
+        y1 = Y1[idx1, :]
+        y2 = Y2[idx2, :]
+        C1, C2, U, VT, rank = get_rotation_lowrank(y1.T, y2.T)
+        plt.figure(figsize=(12, 6))
+        plt.subplot(121)
+        plt.scatter(x1[:, 0], x1[:, 1], 20)
+        for i in idx1:
+            plt.scatter(x1[i, 0], x1[i, 1], 100)
+        plt.subplot(122)
+        plt.scatter(x2[:, 0], x2[:, 1], 20)
+        for i in idx2:
+            plt.scatter(x2[i, 0], x2[i, 1], 100)
+        plt.savefig("Correspondences.png", bbox_inches='tight')
+    else:
+        # Come up with the identity initial rotation which is as good
+        # as any other
+        C1 = np.zeros(dim)
+        C2 = np.zeros(dim)
+        U = np.eye(dim)
+        VT = np.eye(dim)
+        rank = 0
+
+    # Now try a bunch of different initial guesses
+    if rank == dim:
+        # If the rank of the estimated rotation using
+        # correspondences is sufficient, then that's as 
+        # good a guess as any
+        initial_guesses = 1
     min_rmse = np.inf
     idxsMin = []
     for i in range(initial_guesses):
-        # Apply random rotation to y1 to change initial configuration
-        Y1 -= np.mean(Y1, 0)[None, :]
-        R, _, _ = np.linalg.svd(np.random.randn(dim, dim))
-        Y1 = Y1.dot(R)
-        CxList, CyList, RxList, idxList = doICP(Y1.T, Y2.T, MaxIters=100)
+        S = np.eye(dim)
+        if rank < dim:
+            # Come up with a random rotation for the subspace
+            # that's not determined by the correspondences
+            diff = dim-rank
+            r, _, _ = np.linalg.svd(np.random.randn(diff, diff))
+            S[-diff::, -diff::] = r
+        R = U.dot(S.dot(VT))
+        Y1i = (Y1 - C1[None, :]).T
+        Y2i = (Y2 - C2[None, :]).T
+        Y1i = R.dot(Y1i)
+        CxList, CyList, RxList, idxList = doICP(Y1i, Y2i, MaxIters=100)
         rmse = get_rmse(idxList[-1])
         print(rmse)
         if rmse < min_rmse:
+            min_rmse = rmse
             idxsMin = idxList
     
-    plt.figure(figsize=(15, 5))
-    rmses = np.zeros(len(idxsMin))
-    for i, idx in enumerate(idxsMin):
+    rmses = np.zeros(len(idxList))
+    for i, idx in enumerate(idxList):
         D2 = getSSM(Y2[idx, :])
         rmses[i] = get_rmse(idx)
     
-    for i, idx in enumerate(idxsMin):
+    plt.figure(figsize=(15, 10))
+    for i, idx in enumerate(idxList):
         plt.clf()
         idx = np.array(idx)
         plt.subplot(231)
@@ -259,6 +309,8 @@ def testTorusMahalanobis():
                     periodic=True, rotate=True, do_mahalanobis=True, do_plot=True)
 
 if __name__ == '__main__':
-    testTorusMahalanobis()
+    #testTorusMahalanobis()
     #testCylinderMahalanobis()
-    #testICP(nsamples1=1000, nsamples2=2000, noisefac = 0.001, maxeigs=60, delta=3, jacfac=1, dMaxSqr=1)
+    testICP(nsamples1=1000, nsamples2=2000, noisefac = 0.001, \
+            maxeigs=60, delta=3, jacfac=1, dMaxSqr=1, \
+            n_correspondences=4, initial_guesses=10, seed=0)

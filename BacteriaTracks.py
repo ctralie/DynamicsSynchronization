@@ -20,7 +20,7 @@ if __name__ == '__main__':
     do_mahalanobis = False
     namestr = "mahalanobis"
     if do_mahalanobis:
-        dMaxSqrCoeff = 1.0
+        dMaxSqrCoeff = 10.0
         # make mirror symmetric
         y = np.concatenate((x[::-1], x, x[::-1]))
         idx = np.arange(y.size)-x.size
@@ -52,6 +52,6 @@ if __name__ == '__main__':
         D = np.sum(X**2, 1)[:, None]
         DSqr = D + D.T - 2*X.dot(X.T)
         Y = doDiffusionMaps(DSqr, X[:, 0], dMaxSqrCoeff=100, do_plot=False)
-    Y = Y[:, 0:2]
-    fig = plt.figure(figsize=(12, 6))
+    Y = Y[:, 0:3]
+    fig = plt.figure(figsize=(16, 6))
     a = SlidingWindowAnimator("MahalanobisTimeSeries_%s.mp4"%namestr, fig, x, Y, dim, Tau, dT, hop=5)

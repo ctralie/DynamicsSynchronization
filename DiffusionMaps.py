@@ -19,7 +19,7 @@ def getSSM(X):
     D = np.sqrt(D)
     return D
 
-def getDiffusionMap(X, eps, distance_matrix=False, neigs=4, thresh=1e-10, mask=np.array([]), flip=True):
+def getDiffusionMap(X, eps, distance_matrix=False, neigs=4, thresh=1e-2, mask=np.array([]), flip=True):
     """
     Perform diffusion maps with a unit timestep, automatically
     normalizing for nonuniform sampling
@@ -56,13 +56,16 @@ def getDiffusionMap(X, eps, distance_matrix=False, neigs=4, thresh=1e-10, mask=n
     KHat = (K/P[:, None])/P[None, :]
     KHat[KHat < thresh] = 0
     dRow = np.sum(KHat, 1)
-    KHat = sparse.csc_matrix(KHat)
-    M = sparse.diags(dRow).tocsc()
+    dRow[dRow == 0] = 1
+    KHat = sparse.csr_matrix(KHat)
+    M = sparse.diags(1.0/dRow).tocsr()
+    KHat = M @ KHat
+    KHat.eliminate_zeros()
     print("Elapsed Time: %.3g"%(time.time()-tic))
-    print("Solving eigen system...")
+    print("Solving eigen system (sparsity %.3g)..."%(KHat.nnz/float(DSqr.size)))
     tic = time.time()
     # Solve a generalized eigenvalue problem
-    w, v = sparse.linalg.eigsh(KHat, k=neigs, M=M, which='LM')
+    w, v = sparse.linalg.eigsh(KHat, k=neigs, which='LM')
     print("Elapsed Time: %.3g"%(time.time()-tic))
     Y = w[None, :]*v
     if flip:

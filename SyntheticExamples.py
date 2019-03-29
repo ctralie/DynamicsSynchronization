@@ -98,61 +98,6 @@ class TorusMultiDist(PDE2D):
         plt.scatter(self.sites[:, 0]*self.N, self.sites[:, 1]*self.M)
 
 
-
-def testMahalanobis(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, delta=2, rotate=False, do_mahalanobis=True, rank=2, jacfac=1.0, maxeigs=2, periodic=False, cmap='magma_r', do_plot=False):
-    f_patch = lambda x: x
-    if rotate:
-        #f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
-        f_patch = lambda patches: get_ftm2d_polar(patches, pd)
-    #f_patch = get_pc_histograms
-    #f_patch = lambda patches: get_derivative_shells(patches, pd, orders=[0, 1], n_shells=50)
-    #f_patch = lambda patches: get_ftm2d_polar(patches, pd)
-
-    pde.makeObservations(pd=pd, nsamples=nsamples, periodic=periodic, buff=delta, rotate=rotate, f_patch=f_patch)
-    if not (type(nsamples) is tuple):
-        pde.resort_byraster()
-    Xs = pde.Xs
-    Ts = pde.Ts
-    N = Xs.size
-    mask = np.ones((N, N))
-    if do_mahalanobis:
-        res = getMahalanobisDists(pde.patches, pde.get_mahalanobis_ellipsoid, delta, n_points=100, rank=rank, jacfac=jacfac, maxeigs=maxeigs)
-        sio.savemat("DSqr.mat", res)
-        res = sio.loadmat("DSqr.mat")
-        DSqr, mask = res["gamma"], res["mask"]
-    else:
-        D = np.sum(pde.patches**2, 1)[:, None]
-        DSqr = D + D.T - 2*pde.patches.dot(pde.patches.T)
-    DSqr[DSqr < 0] = 0
-
-    D = np.sqrt(DSqr)
-    D[mask == 0] = np.inf
-    Y = doDiffusionMaps(DSqr, Xs, dMaxSqr, do_plot=False, mask=mask, neigs=8)
-
-    if do_plot:
-        fig = plt.figure(figsize=(18, 6))
-        if Y.shape[1] > 2:
-            ax = fig.add_subplot(131, projection='3d')
-            ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=Xs, cmap=cmap)
-        else:
-            plt.subplot(131)
-            plt.scatter(Y[:, 0], Y[:, 1], c=Xs, cmap=cmap)
-        plt.title("X")
-        if Y.shape[1] > 2:
-            ax = fig.add_subplot(132, projection='3d')
-            ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=Ts, cmap=cmap)
-        else:
-            plt.subplot(132)
-            plt.scatter(Y[:, 0], Y[:, 1], c=Ts, cmap=cmap)
-        plt.title("T")
-        plt.subplot(133)
-        plt.imshow(D, aspect='auto', cmap=cmap)
-        plt.show()
-
-        pde.makeVideo(Y, D, skip=1, cmap=cmap)
-    
-    return Y
-
 def testICP(noisefac = 0.001, maxeigs=40, delta=3, jacfac=1, dMaxSqr=10, \
             nsamples1 = (30, 30), nsamples2 = (30, 30), \
             pd1 = (25, 25), pd2 = (25, 25), \
@@ -163,13 +108,13 @@ def testICP(noisefac = 0.001, maxeigs=40, delta=3, jacfac=1, dMaxSqr=10, \
     np.random.seed(seed)
     pde1 = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=2)
     pde1.I += noisefac*np.random.randn(pde1.I.shape[0], pde1.I.shape[1])
-    Y1 = testMahalanobis(pde1, pd=pd1, nsamples=nsamples1, \
+    Y1 = testMahalanobis_PDE2D(pde1, pd=pd1, nsamples=nsamples1, \
                     dMaxSqr=dMaxSqr, delta=delta, rank=2, \
                     maxeigs=maxeigs, jacfac=jacfac,\
                     periodic=True, rotate=False, do_mahalanobis=True)
     pde2 = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=1)
     pde2.I += noisefac*np.random.randn(pde2.I.shape[0], pde2.I.shape[1])
-    Y2 = testMahalanobis(pde2, pd=pd2, nsamples=nsamples2, \
+    Y2 = testMahalanobis_PDE2D(pde2, pd=pd2, nsamples=nsamples2, \
                     dMaxSqr=dMaxSqr, delta=delta, rank=2, \
                     maxeigs=maxeigs, jacfac=jacfac,\
                     periodic=True, rotate=False, do_mahalanobis=True)
@@ -277,15 +222,15 @@ def testICP(noisefac = 0.001, maxeigs=40, delta=3, jacfac=1, dMaxSqr=10, \
 
         D2 = getSSM(Y2[idx, :])
         plt.subplot(234)
-        plt.imshow(D1)
+        plt.imshow(largeimg(D1))
         plt.title("D1 Mahalanobis")
         plt.colorbar()
         plt.subplot(235)
-        plt.imshow(D2)
+        plt.imshow(largeimg(D2))
         plt.colorbar()
         plt.title("D2 Mahalanobis Iter %i"%i)
         plt.subplot(236)
-        plt.imshow(D1-D2)
+        plt.imshow(largeimg(D1-D2))
         plt.colorbar()
         plt.title("Difference (RMSE=%.3g)"%rmses[i])
         plt.tight_layout()
@@ -293,24 +238,27 @@ def testICP(noisefac = 0.001, maxeigs=40, delta=3, jacfac=1, dMaxSqr=10, \
 
 def testCylinderMahalanobis():
     pde = TorusDist(35, 100, (0.2, 0.2), alpha_phi=0); nsamples=(1, 500)
-    testMahalanobis(pde, pd=(25, 25), nsamples=nsamples, \
+    testMahalanobis_PDE2D(pde, pd=(25, 25), nsamples=nsamples, \
                     dMaxSqr=1, delta=3, rank=1, maxeigs=6, jacfac=1,\
                     periodic=True, rotate=False, do_mahalanobis=True, do_plot=True)
 
 def testTorusMahalanobis():
-    np.random.seed(6); pde = TorusMultiDist(50, 100, 3, tile_y=2); nsamples=1000 #(30, 30)
+    np.random.seed(6); pde = TorusMultiDist(50, 100, 3, tile_y=2); nsamples=10000 #(30, 30)
     #pde = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=1); nsamples=(30, 30)
     noisefac = 0.001
     pde.I += noisefac*np.random.randn(pde.I.shape[0], pde.I.shape[1])
     pde.drawSolutionImage()
     plt.show()
-    testMahalanobis(pde, pd=(25, 25), nsamples=nsamples, \
-                    dMaxSqr=10, delta=3, rank=2, maxeigs=40, jacfac=0.25,\
-                    periodic=True, rotate=True, do_mahalanobis=True, do_plot=True)
+    testMahalanobis_PDE2D(pde, pd=(25, 25), nsamples=nsamples, \
+                    dMaxSqr=10, delta=3, rank=2, maxeigs=10, jacfac=2,\
+                    periodic=True, rotate=True, do_mahalanobis=True, \
+                    precomputed_samples=(400, 400), pca_dim=10, do_plot=True)
 
 if __name__ == '__main__':
-    #testTorusMahalanobis()
+    testTorusMahalanobis()
     #testCylinderMahalanobis()
+    """
     testICP(nsamples1=1000, nsamples2=2000, noisefac = 0.001, \
             maxeigs=60, delta=3, jacfac=1, dMaxSqr=1, \
             n_correspondences=4, initial_guesses=10, seed=0)
+    """

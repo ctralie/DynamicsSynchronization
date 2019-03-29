@@ -6,6 +6,8 @@ import sklearn.feature_extraction.image as skimage
 import time
 from scipy import interpolate
 import scipy.sparse as sparse
+from sklearn.decomposition import PCA
+import skimage.transform
 from mpl_toolkits.mplot3d import Axes3D
 import sys
 import warnings
@@ -14,6 +16,13 @@ from Mahalanobis import *
 from LocalPCA import *
 from PatchDescriptors import *
 
+imresize = lambda x, M, N: skimage.transform.resize(x, (M, N), anti_aliasing=True, mode='reflect')
+def largeimg(D, limit=20000):
+    res = max(D.shape[0], D.shape[1])
+    if res > limit:
+        fac = float(limit)/res
+        return imresize(D, int(fac*D.shape[0]), int(fac*D.shape[1]))
+    return D
 
 def even_interval(k):
     """
@@ -70,13 +79,29 @@ class PDE2D(object):
         an axis-aligned patch
     pd: tuple(int, int)
         The dimensions of each patch (height, width)
-    f: function ndarray->ndarray
+    f_pointwise: function ndarray->ndarray
         A pointwise homeomorphism to apply to pixels in the observation function
+    f_patch: funtion: ndarray(n_patches, n_pixels) -> ndarray(n_patches, n_features)
+        A function to apply to all patches
+    pca: sklearn.decomposition.PCA
+        A PCA object if the patch function should be composed with
+        a linear dimension reduction
     """
     def __init__(self):
         self.I = np.array([[]])
         self.periodic = True
         self.mc = None
+
+    def copy(self):
+        """
+        Make a copy of this PDE
+        """
+        other = PDE2D()
+        other.I = np.array(self.I)
+        other.pd = self.pd
+        other.f_pointwise = self.f_pointwise
+        other.f_patch = self.f_patch
+        other.pca = self.pca
 
     def drawSolutionImage(self):
         plt.imshow(self.I, interpolation='none', aspect='auto', cmap='RdGy')
@@ -143,6 +168,7 @@ class PDE2D(object):
         self.pd = pd
         self.f_pointwise = f_pointwise
         self.f_patch = f_patch
+        self.pca = None
         self.rotate_patches = False
 
     def makeObservations(self, pd, nsamples, uniform=True, periodic=True, rotate = False, \
@@ -169,6 +195,7 @@ class PDE2D(object):
         f_pointwise: function ndarray->ndarray
             A pointwise homeomorphism to apply to pixels in the observation function
         """
+        tic = time.time()
         self.periodic = periodic
         f_interp = self.getInterpolator()
         # Make sure a rotated patch is within the time range
@@ -186,6 +213,7 @@ class PDE2D(object):
         self.pd = pd
         self.f_pointwise = f_pointwise
         self.f_patch = f_patch
+        self.pca = None
         if isinstance(nsamples, tuple):
             M, N = nsamples
             if periodic:
@@ -234,13 +262,7 @@ class PDE2D(object):
         patches = (f_interp(ts.flatten(), xs.flatten(), grid=False))
         patches = np.reshape(patches, ts.shape)
         self.patches = f_patch(f_pointwise(patches))
-
-    def resort_byraster(self, resy=20):
-        idx = approximate_rasterorder(self.Xs, self.Ts, resy)
-        self.Xs = self.Xs[idx]
-        self.Ts = self.Ts[idx]
-        self.thetas = self.thetas[idx]
-        self.patches = self.patches[idx, :]
+        print("Elapsed time patch sampling: %.3g"%(time.time()-tic))
 
     def get_mahalanobis_ellipsoid(self, idx, delta, n_points):
         # function(ndarray(d) x0, int idx, float delta, int n_points) -> ndarray(n_points, d)
@@ -288,8 +310,74 @@ class PDE2D(object):
         patches = f_interp(ts.flatten(), xs.flatten(), grid=False)
         patches = np.reshape(patches, (n_points, pdx.size))
         # Apply function and center samples
-        Y = f_patch(f_pointwise(patches)) - y[None, :]
-        return Y
+        Y = f_patch(f_pointwise(patches))
+        if self.pca:
+            Y = self.pca.transform(Y)
+        return Y - y[None, :]
+
+    def get_mahalanobis_ellipsoid_from_precomputed(self, other, idx, delta, n_points, delta_theta, verbose=False):
+        # function(ndarray(d) x0, int idx, float delta, int n_points) -> ndarray(n_points, d)
+        """
+        Return a centered ellipsoid, using patches that have already been
+        constructed from a system that's assumed to be using the same
+        observation functions
+        Parameters
+        ----------
+        other: PDE2D
+            Another instance of this PDE, assumed to have been sampled
+            on a grid with the same dimensions, using the same patch functions
+        idx: int
+            Index of patch around which to compute the ellipsoid
+        delta: float
+            Radius of circle in spacetime to sample in preimage
+        n_points: int
+            Number of points to sample in the ellipsoid
+        delta_theta: float
+            The maximum angle allowed between patches that are considered
+            neighbors
+        Returns
+        -------
+        ellipsoid: ndarray(n_points, patchdim)
+            Centered ellipsoid around patch at index idx
+        """
+        y = self.patches[idx, :]
+        x = np.array([self.Ts[idx], self.Xs[idx]])
+        X = np.array([other.Ts, other.Xs]).T
+        C = np.sum(x**2) + np.sum(X**2, 1) - 2*np.sum(X*x[None, :], 1)
+        if other.periodic:
+            X[:, 1] = (X[:, 1] + other.I.shape[1]) % self.I.shape[1]
+            C2 = np.sum(x**2) + np.sum(X**2, 1) - 2*np.sum(X*x[None, :], 1)
+            C = np.minimum(C, C2)
+        Y = other.patches[(C <= delta**2)*(np.abs(other.thetas-self.thetas[idx]) < delta_theta), :]
+        if verbose:
+            print("Patch %i: %i existing points in jacobian"%(idx, Y.shape[0]))
+        if Y.shape[0] > n_points:
+            Y = Y[np.random.permutation(Y.shape[0])[0:n_points], :]
+        return Y - y[None, :]
+
+    def compose_with_dimreduction(self, pca = None, dim = np.inf):
+        """
+        Perform a linear dimension reduction of the patches, 
+        and compose the patch function with that dimension reduction.
+        There is the option to pass along a pca object from somewhere
+        else, or to compute one from scratch
+        Parameters
+        ----------
+        pca: sklearn.decomposition.PCA
+            A PCA object to apply (None by default)
+        dim: int
+            Dimension to which to project, if no pca object
+            is passed along
+        """
+        if not pca:
+            assert dim <= self.patches.shape[1]
+            print("Reducing patch dimensions from %i to %i"%(self.patches.shape[1], dim))
+            pca = PCA(n_components=dim)
+            self.patches = pca.fit_transform(self.patches)
+            self.pca = pca
+        else:
+            self.patches = pca.transform(self.patches)
+            self.pca = pca
 
     
     def plotPatchBoundary(self, i, draw_arrows=True):
@@ -320,6 +408,22 @@ class PDE2D(object):
             ax.arrow(xc, tc, R[0, 0], R[1, 0], head_width = 5, head_length = 3, fc = 'c', ec = 'c', width = 1)
             ax.arrow(xc, tc, R[0, 1], R[1, 1], head_width = 5, head_length = 3, fc = 'g', ec = 'g', width = 1)
 
+    def resort_byraster(self, resy=20):
+        idx = approximate_rasterorder(self.Xs, self.Ts, resy)
+        self.Xs = self.Xs[idx]
+        self.Ts = self.Ts[idx]
+        self.thetas = self.thetas[idx]
+        self.patches = self.patches[idx, :]
+
+    def get_patch(self, idx):
+        """
+        Unwrap a patch, possibly undoing PCA
+        """
+        p = self.patches[idx, :]
+        if self.pca:
+            p = self.pca.inverse_transform(p)
+        return np.reshape(p, self.pd)
+
     def plotPatches(self, save_frames = True):
         """
         Make a video of the patches
@@ -341,7 +445,7 @@ class PDE2D(object):
                 plt.ylim(self.I.shape[0], 0)
             if save_frames:
                 plt.subplot(122)
-                p = np.reshape(self.patches[i, :], self.pd)
+                p = self.get_patch(i)
                 plt.imshow(p, interpolation='none', cmap='RdGy', vmin=np.min(self.I), vmax=np.max(self.I))
                 plt.savefig("%i.png"%i, bbox_inches='tight')
 
@@ -370,7 +474,7 @@ class PDE2D(object):
             plt.xlim(0, I.shape[1])
             plt.ylim(I.shape[0], 0)
             plt.subplot(232)
-            p = np.reshape(self.patches[i, :], self.pd)
+            p = self.get_patch(i)
             plt.imshow(p, interpolation='none', cmap='RdGy', vmin=np.min(self.I), vmax=np.max(self.I))
 
             if Y.shape[1] == 2:
@@ -418,3 +522,70 @@ class PDE2D(object):
 
             plt.savefig("%i.png"%idx)
             idx += 1
+
+
+
+def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, delta=2, rotate=False, do_mahalanobis=True, rank=2, jacfac=1.0, maxeigs=2, periodic=False, cmap='magma_r', pca_dim = None, precomputed_samples = None, do_plot=False):
+    f_patch = lambda x: x
+    delta_theta = 0.1
+    if rotate:
+        f_patch = lambda patches: get_ftm2d_polar(patches, pd)
+        delta_theta = 2*np.pi
+
+    pde.makeObservations(pd=pd, nsamples=nsamples, periodic=periodic, buff=delta, rotate=rotate, f_patch=f_patch)
+    if not (type(nsamples) is tuple):
+        pde.resort_byraster()
+    Xs = pde.Xs
+    Ts = pde.Ts
+    N = Xs.size
+    mask = np.ones((N, N))
+    if do_mahalanobis:
+        if pca_dim:
+            pde.compose_with_dimreduction(dim=pca_dim)
+        if precomputed_samples:
+            other = PDE2D()
+            other.I = np.array(pde.I)
+            print("Sampling precomputed patches for mahalanobis...")
+            other.makeObservations(pd=pd, nsamples=precomputed_samples, periodic=periodic, buff=delta, rotate=rotate, f_patch=f_patch)
+            if pde.pca:
+                other.compose_with_dimreduction(pca=pde.pca)
+            print("Finished sampling precomputed patches")
+            fn_ellipsoid = lambda idx, delta, n_points: pde.get_mahalanobis_ellipsoid_from_precomputed(other, idx, delta, n_points, delta_theta, True)
+        else:
+            fn_ellipsoid = pde.get_mahalanobis_ellipsoid
+        res = getMahalanobisDists(pde.patches, fn_ellipsoid, delta, n_points=100, rank=rank, jacfac=jacfac, maxeigs=maxeigs)
+        sio.savemat("DSqr.mat", res)
+        res = sio.loadmat("DSqr.mat")
+        DSqr, mask = res["gamma"], res["mask"]
+    else:
+        D = np.sum(pde.patches**2, 1)[:, None]
+        DSqr = D + D.T - 2*pde.patches.dot(pde.patches.T)
+    DSqr[DSqr < 0] = 0
+
+    D = np.sqrt(DSqr)
+    D[mask == 0] = np.inf
+    Y = doDiffusionMaps(DSqr, Xs, dMaxSqr, do_plot=False, mask=mask, neigs=8)
+
+    if do_plot:
+        fig = plt.figure(figsize=(18, 6))
+        if Y.shape[1] > 2:
+            ax = fig.add_subplot(131, projection='3d')
+            ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=Xs, cmap=cmap)
+        else:
+            plt.subplot(131)
+            plt.scatter(Y[:, 0], Y[:, 1], c=Xs, cmap=cmap)
+        plt.title("X")
+        if Y.shape[1] > 2:
+            ax = fig.add_subplot(132, projection='3d')
+            ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=Ts, cmap=cmap)
+        else:
+            plt.subplot(132)
+            plt.scatter(Y[:, 0], Y[:, 1], c=Ts, cmap=cmap)
+        plt.title("T")
+        plt.subplot(133)
+        plt.imshow(largeimg(D), aspect='auto', cmap=cmap)
+        plt.show()
+
+        pde.makeVideo(Y, D, skip=1, cmap=cmap)
+    
+    return Y

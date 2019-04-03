@@ -73,11 +73,10 @@ class KSSimulation(PDE2D):
 
 def testKS_Diffusion(pde, pd, nsamples, delta, rotate=False, use_rotinvariant = False, dMaxSqr=1.0, do_mahalanobis=False, rank=2, jacfac=1, maxeigs=10, noisefac=0.0, do_tda=False, do_video=False, cmap='magma_r'):
     pde.I += noisefac*np.max(np.abs(pde.I))*np.random.randn(pde.I.shape[0], pde.I.shape[1])
-    plt.imshow(pde.I, cmap='RdGy')
-    plt.show()
     testMahalanobis_PDE2D(pde, pd=pd, nsamples=nsamples, \
                     dMaxSqr=dMaxSqr, delta=3, rank=2, maxeigs=maxeigs, jacfac=1,\
-                    periodic=True, rotate=False, do_mahalanobis=do_mahalanobis, \
+                    periodic=True, rotate=rotate, use_rotinvariant=use_rotinvariant, \
+                    do_mahalanobis=do_mahalanobis, \
                     precomputed_samples=None, pca_dim=40, do_plot=True, do_tda=do_tda, do_video=do_video)
 
 
@@ -161,8 +160,8 @@ if __name__ == '__main__':
     ks = KSSimulation(co_rotating=False, scale=(fac*7, fac/2))
     ks.I = ks.I[0:225, :]
     testKS_Diffusion(ks, pd = (64, 64), nsamples=2000,
-        dMaxSqr=20, delta=2, rank=2, maxeigs=15, jacfac=1, noisefac=0.001,
-        rotate=False, use_rotinvariant=False, \
+        dMaxSqr=1000, delta=2, rank=2, maxeigs=20, jacfac=1, noisefac=0.001,
+        rotate=True, use_rotinvariant=True, \
         do_mahalanobis=True, do_tda=True, do_video=True)
     #"""
     #testKS_Variations(ks)

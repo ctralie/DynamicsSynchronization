@@ -19,6 +19,9 @@ import subprocess
 
 imresize = lambda x, M, N: skimage.transform.resize(x, (M, N), anti_aliasing=True, mode='reflect')
 def largeimg(D, mask, limit=1000):
+    """
+    Display an anti-aliased version of a masked image
+    """
     res = max(D.shape[0], D.shape[1])
     if res > limit:
         fac = float(limit)/res
@@ -26,7 +29,10 @@ def largeimg(D, mask, limit=1000):
         retD = imresize(D, int(fac*D.shape[0]), int(fac*D.shape[1]))
         retD[maskD < 0.01] = np.inf
         return retD
-    return D
+    else:
+        retD = np.array(D)
+        retD[mask == 0] = np.inf
+        return retD
 
 def even_interval(k):
     """
@@ -109,6 +115,7 @@ class PDE2D(object):
         other.f_pointwise = self.f_pointwise
         other.f_patch = self.f_patch
         other.pca = self.pca
+        return other
 
     def drawSolutionImage(self):
         plt.imshow(self.I, interpolation='none', aspect='auto', cmap='RdGy')
@@ -432,11 +439,9 @@ class PDE2D(object):
 
     def get_patch(self, idx):
         """
-        Unwrap a patch, possibly undoing PCA
+        Unwrap a patch before a function was applied
         """
         p = self.patches[idx, :]
-        if self.pca:
-            p = self.pca.inverse_transform(p)
         return np.reshape(p, self.pd)
 
     def plotPatches(self, save_frames = True):
@@ -467,8 +472,16 @@ class PDE2D(object):
     def makeVideo(self, Y, D = np.array([]), skip=20, cmap='magma_r', colorvar=np.array([])):
         """
         Make a video given a nonlinear dimension reduction, which
-        is assumed to be indexed parallel to the patches
+        is assumed to be indexed parallel to the patches and in approximate raster order
         """
+        # Resample original patches for display
+        patches_before = np.array(self.patches)
+        f_patch_before = self.f_patch
+        f_pointwise_before = self.f_pointwise
+        self.f_patch = lambda x: x
+        self.f_pointwise = lambda x: x
+        self.completeObservations()
+
         if colorvar.size == 0:
             colorvar = self.Xs
         c = plt.get_cmap(cmap)
@@ -492,7 +505,6 @@ class PDE2D(object):
             plt.subplot(232)
             p = self.get_patch(i)
             plt.imshow(p, interpolation='none', cmap='RdGy', vmin=np.min(self.I), vmax=np.max(self.I))
-
             if Y.shape[1] == 2:
                 plt.subplot(234)
                 plt.scatter(Y[:, 0], Y[:, 1], 100, c=np.array([[0, 0, 0, 0]]))
@@ -539,13 +551,17 @@ class PDE2D(object):
 
             plt.savefig("%i.png"%idx)
             idx += 1
+        # Set patches back to what they were
+        self.patches = patches_before
+        self.f_patch = f_patch_before
+        self.f_pointwise = f_pointwise_before
 
 
 
-def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, delta=2, rotate=False, do_mahalanobis=True, rank=2, jacfac=1.0, maxeigs=2, periodic=False, cmap='magma_r', pca_dim = None, precomputed_samples = None, do_plot=True, do_tda = False, do_video = False):
+def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, delta=2, rotate=False, use_rotinvariant=False, do_mahalanobis=True, rank=2, jacfac=1.0, maxeigs=2, periodic=False, cmap='magma_r', pca_dim = None, precomputed_samples = None, do_plot=True, do_tda = False, do_video = False):
     f_patch = lambda x: x
     delta_theta = 0.1
-    if rotate:
+    if use_rotinvariant:
         f_patch = lambda patches: get_ftm2d_polar(patches, pd)
         delta_theta = 2*np.pi
 
@@ -559,11 +575,6 @@ def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, d
     if do_mahalanobis:
         if pca_dim:
             pde.compose_with_dimreduction(dim=pca_dim)
-            #print(pde.pca.variance_explained_ratio_)
-            ax = plt.gcf().add_subplot(111, projection='3d')
-            X = pde.patches
-            ax.scatter(X[:, 0], X[:, 1], X[:, 2], c=pde.Ts)
-            plt.show()
         if precomputed_samples:
             other = PDE2D()
             other.I = np.array(pde.I)
@@ -575,7 +586,7 @@ def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, d
             fn_ellipsoid = lambda idx, delta, n_points: pde.get_mahalanobis_ellipsoid_from_precomputed(other, idx, delta, n_points, delta_theta, True)
         else:
             fn_ellipsoid = pde.get_mahalanobis_ellipsoid
-        res = getMahalanobisDists(pde.patches, fn_ellipsoid, delta, n_points=30, rank=rank, jacfac=jacfac, maxeigs=maxeigs)
+        res = getMahalanobisDists(pde.patches, fn_ellipsoid, delta, n_points=100, rank=rank, jacfac=jacfac, maxeigs=maxeigs)
         sio.savemat("DSqr.mat", res)
         res = sio.loadmat("DSqr.mat")
         DSqr, mask = res["gamma"], res["mask"]
@@ -586,7 +597,7 @@ def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, d
 
     D = np.sqrt(DSqr)
     Y = doDiffusionMaps(DSqr, Xs, dMaxSqr, do_plot=False, mask=mask, neigs=8)
-    subprocess.call(["espeak", "Finished"])
+    #subprocess.call(["espeak", "Finished"])
 
     if do_plot:
         plt.figure(figsize=(24, 12))

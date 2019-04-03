@@ -3,6 +3,7 @@ Purpose: Code to implement Procrustes Alignment
 and the Iterative Closest Points Algorithm
 """
 import numpy as np
+import matplotlib.pyplot as plt
 import scipy
 import scipy.spatial
 from scipy.spatial import distance
@@ -199,3 +200,145 @@ def get_rotation_lowrank(X, Y):
     thresh = eps*S.max()*max(Cov.shape)
     rank = int(np.sum(S > thresh))
     return Cx.flatten(), Cy.flatten(), U, VT, rank
+
+
+def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10, do_plot=False):
+    """
+    Do ICP on a set of observations from a PDE
+    Parameters
+    ----------
+    pde1: PDE2D
+        First PDE with M patches
+    Y1: ndarray(M, k)
+        Dimension-reduced version of first set of patches
+    pde2: PDE2D
+        Second PDE with N patches
+    Y2: ndarray(N, k)
+        Dimension-reduced version of second set of patches
+    corresp: ndarray(L, 2)
+        A list of L correspondences
+    initial_guesses: int
+        Number of initial guesses to take
+    do_plot: boolean
+        Whether to plot correspondence plot and ICP iterations
+    """
+    from DiffusionMaps import getSSM
+    dim = Y2.shape[1]
+    D1 = getSSM(Y1)
+    D2 = getSSM(Y2)
+    vmax = max(np.max(D1), np.max(D2))
+    plt.figure(figsize=(10, 10))
+    plt.subplot(221)
+    pde1.drawSolutionImage()
+    plt.title("Observation 1")
+    plt.subplot(222)
+    pde2.drawSolutionImage()
+    plt.title("Observation 2")
+    plt.subplot(223)
+    plt.imshow(D1, cmap='magma_r', vmin=0, vmax=vmax)
+    plt.colorbar()
+    plt.subplot(224)
+    plt.imshow(D2, cmap='magma_r', vmin=0, vmax=vmax)
+    plt.colorbar()
+    plt.savefig("Observations.png", bbox_inches='tight')
+    
+    D1 = getSSM(Y1)
+    get_rmse = lambda idx: np.sqrt(np.mean((D1-getSSM(Y2[idx, :])**2)))
+
+    if corresp.shape[0] > 0:
+        # If some correspondences are provided, use them
+        # to help come up with a good initial guess
+        idx1 = corresp[:, 0]
+        idx2 = corresp[:, 1]
+        y1 = Y1[idx1, :]
+        y2 = Y2[idx2, :]
+        C1, C2, U, VT, rank = get_rotation_lowrank(y1.T, y2.T)
+        if do_plot:
+            x1 = np.concatenate((pde1.Xs[:, None], pde1.Ts[:, None]), 1)
+            x2 = np.concatenate((pde2.Xs[:, None], pde2.Ts[:, None]), 1)
+            plt.figure(figsize=(12, 6))
+            plt.subplot(121)
+            plt.scatter(x1[:, 0], x1[:, 1], 20)
+            for i in idx1:
+                plt.scatter(x1[i, 0], x1[i, 1], 100)
+            plt.subplot(122)
+            plt.scatter(x2[:, 0], x2[:, 1], 20)
+            for i in idx2:
+                plt.scatter(x2[i, 0], x2[i, 1], 100)
+            plt.savefig("ICP_Correspondences.png", bbox_inches='tight')
+    else:
+        # Come up with the identity initial rotation which is as good
+        # as any other
+        C1 = np.zeros(dim)
+        C2 = np.zeros(dim)
+        U = np.eye(dim)
+        VT = np.eye(dim)
+        rank = 0
+
+    # Now try a bunch of different initial guesses
+    if rank == dim:
+        # If the rank of the estimated rotation using
+        # correspondences is sufficient, then that's as 
+        # good a guess as any
+        initial_guesses = 1
+    min_rmse = np.inf
+    idxsMin = []
+    for i in range(initial_guesses):
+        S = np.eye(dim)
+        if rank < dim:
+            # Come up with a random rotation for the subspace
+            # that's not determined by the correspondences
+            diff = dim-rank
+            r, _, _ = np.linalg.svd(np.random.randn(diff, diff))
+            S[-diff::, -diff::] = r
+        R = U.dot(S.dot(VT))
+        Y1i = (Y1 - C1[None, :]).T
+        Y2i = (Y2 - C2[None, :]).T
+        Y1i = R.dot(Y1i)
+        CxList, CyList, RxList, idxList = doICP(Y1i, Y2i, MaxIters=100)
+        rmse = get_rmse(idxList[-1])
+        print(rmse)
+        if rmse < min_rmse:
+            min_rmse = rmse
+            idxsMin = idxList
+    
+    rmses = np.zeros(len(idxList))
+    for i, idx in enumerate(idxList):
+        D2 = getSSM(Y2[idx, :])
+        rmses[i] = get_rmse(idx)
+    
+    if do_plot:
+        plt.figure(figsize=(15, 10))
+        for i, idx in enumerate(idxList):
+            plt.clf()
+            idx = np.array(idx)
+            plt.subplot(231)
+            plt.scatter(pde1.Xs, pde1.Ts, c=pde2.Xs[idx])
+            plt.title("Xs")
+            plt.subplot(232)
+            plt.scatter(pde1.Xs, pde1.Ts, c=pde2.Ts[idx])
+            plt.title("Ts")
+            plt.subplot(233)
+            plt.plot(rmses)
+            plt.scatter([i], [rmses[i]])
+            plt.xlabel("Iteration number")
+            plt.title("ICP Convergence")
+            plt.ylabel("RMSE")
+
+            D2 = getSSM(Y2[idx, :])
+            plt.subplot(234)
+            plt.imshow(D1)
+            plt.title("D1 Mahalanobis")
+            plt.colorbar()
+            plt.subplot(235)
+            plt.imshow(D2)
+            plt.colorbar()
+            plt.title("D2 Mahalanobis Iter %i"%i)
+            plt.subplot(236)
+            plt.imshow(D1-D2)
+            plt.colorbar()
+            plt.title("Difference (RMSE=%.3g)"%rmses[i])
+            plt.tight_layout()
+            plt.savefig("ICP%i.png"%i, bbox_inches='tight')
+    
+    return idxList[-1]

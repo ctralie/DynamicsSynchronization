@@ -13,7 +13,7 @@ from scipy.interpolate import InterpolatedUnivariateSpline
 class KSSimulation(PDE2D):
     def __init__(self, co_rotating = False, scale=(1.0, 1.0)):
         PDE2D.__init__(self)
-        res = sio.loadmat("KS_10xT.mat")
+        res = sio.loadmat("KS.mat")
         self.I = res["data"]
         M, N = self.I.shape[0], self.I.shape[1]
         if co_rotating:
@@ -158,7 +158,7 @@ if __name__ == '__main__':
     #testKS_VerticalOnly()
     #"""
     fac = 0.5
-    ks = KSSimulation(co_rotating=False, scale=(fac/2, fac/2))
+    ks = KSSimulation(co_rotating=False, scale=(fac*7, fac/2))
     ks.I = ks.I[0:225, :]
     testKS_Diffusion(ks, pd = (64, 64), nsamples=2000,
         dMaxSqr=20, delta=2, rank=2, maxeigs=15, jacfac=1, noisefac=0.001,

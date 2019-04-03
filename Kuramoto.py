@@ -13,13 +13,12 @@ from scipy.interpolate import InterpolatedUnivariateSpline
 class KSSimulation(PDE2D):
     def __init__(self, co_rotating = False, scale=(1.0, 1.0)):
         PDE2D.__init__(self)
-        res = sio.loadmat("KS.mat")
+        res = sio.loadmat("KS_10xT.mat")
         self.I = res["data"]
         M, N = self.I.shape[0], self.I.shape[1]
         if co_rotating:
             self.make_corotating()
         self.I = resize(self.I, (M*scale[0], N*scale[1]), anti_aliasing=True, mode='reflect')
-        print(self.I.shape)
         self.ts = np.linspace(res["tmin"].flatten(), res["tmax"].flatten(), M)
     
     def make_corotating(self, do_plot=False):
@@ -57,8 +56,8 @@ class KSSimulation(PDE2D):
             plt.plot([0, -dy*INew.shape[1]], [0, dx*INew.shape[1]], 'r')
             plt.title("Original")
             plt.subplot(122)
-            plt.imshow(INew)
-            plt.title("Co-Rotating", cmap="gray")
+            plt.imshow(INew, cmap="gray")
+            plt.title("Co-Rotating")
             plt.show()
         self.I = INew
 
@@ -72,19 +71,14 @@ class KSSimulation(PDE2D):
 
 
 
-def testKS_Diffusion(pde, pd, nsamples, delta, rotate=False, use_rotinvariant = False, dMaxSqr=1.0, do_mahalanobis=False, rank=2, jacfac=1, maxeigs=10, noisefac=0.0, do_tda=False, make_video=True, cmap='magma_r'):
-    Y = testMahalanobis_PDE2D(pde, pd=pd, nsamples=nsamples, \
+def testKS_Diffusion(pde, pd, nsamples, delta, rotate=False, use_rotinvariant = False, dMaxSqr=1.0, do_mahalanobis=False, rank=2, jacfac=1, maxeigs=10, noisefac=0.0, do_tda=False, do_video=False, cmap='magma_r'):
+    pde.I += noisefac*np.max(np.abs(pde.I))*np.random.randn(pde.I.shape[0], pde.I.shape[1])
+    plt.imshow(pde.I, cmap='RdGy')
+    plt.show()
+    testMahalanobis_PDE2D(pde, pd=pd, nsamples=nsamples, \
                     dMaxSqr=dMaxSqr, delta=3, rank=2, maxeigs=maxeigs, jacfac=1,\
                     periodic=True, rotate=False, do_mahalanobis=do_mahalanobis, \
-                    precomputed_samples=(200, 200), pca_dim=20, do_plot=True)
-    if do_tda:
-        from ripser import ripser
-        from persim import plot_diagrams as plot_dgms
-        perm, lambdas = getGreedyPerm(Y, 600)
-        plt.figure()
-        dgms = ripser(Y[perm, :], maxdim=2)["dgms"]
-        plot_dgms(dgms, show=False)
-        plt.show()
+                    precomputed_samples=None, pca_dim=40, do_plot=True, do_tda=do_tda, do_video=do_video)
 
 
 def testKS_Variations(ks):
@@ -110,21 +104,66 @@ def testKS_Rotations(ks):
     plt.show()
     ks.plotPatches()
 
-if __name__ == '__main__':
+def testKS_VerticalOnly():
+    cmap = 'magma_r'
+    dMaxSqr = 1
     fac = 0.5
     ks = KSSimulation(co_rotating=True, scale=(fac, fac/2))
+    ks.I = ks.I[0:200, :]
+    print("Shape = (%i, %i)"%ks.I.shape)
+    dim = 64
+    #ks.Ts = np.linspace(dim/2, ks.I.shape[0]-dim/2, 200)
+    #ks.Xs = ks.I.shape[1]/2*np.ones_like(ks.Ts)
+    ks.Xs = np.linspace(0, ks.I.shape[1], 200)
+    ks.Ts = ks.I.shape[0]/2*np.ones_like(ks.Xs)
+    ks.thetas = (np.pi/4)*np.ones_like(ks.Ts)
+    ks.pca = None
+    ks.pd = (dim, dim)
+    ks.completeObservations()
+    Xs, Ts = ks.Xs, ks.Ts
 
-    """
-    ks.makeObservations(pd=(32, 32), nsamples=(100, 100), periodic=True, buff=3, rotate=False)
-    ks.compose_with_dimreduction(dim=3)
-    X = ks.patches
-    ax = plt.gcf().add_subplot(111, projection='3d')
-    ax.scatter(X[:, 0], X[:, 1], X[:, 2], c=ks.Ts)
+    D = np.sum(ks.patches**2, 1)[:, None]
+    DSqr = D + D.T - 2*ks.patches.dot(ks.patches.T)
+    DSqr[DSqr < 0] = 0
+    mask = np.ones_like(DSqr)
+    D = np.sqrt(DSqr)
+    D[mask == 0] = np.inf
+
+    Y = doDiffusionMaps(DSqr, Xs, dMaxSqr, do_plot=False, mask=mask, neigs=8)
+    
+
+    fig = plt.figure(figsize=(18, 6))
+    if Y.shape[1] > 2:
+        ax = fig.add_subplot(131, projection='3d')
+        ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=Xs, cmap=cmap)
+    else:
+        plt.subplot(131)
+        plt.scatter(Y[:, 0], Y[:, 1], c=Xs, cmap=cmap)
+    plt.title("X")
+    if Y.shape[1] > 2:
+        ax = fig.add_subplot(132, projection='3d')
+        ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=Ts, cmap=cmap)
+    else:
+        plt.subplot(132)
+        plt.scatter(Y[:, 0], Y[:, 1], c=Ts, cmap=cmap)
+    plt.title("T")
+    plt.subplot(133)
+    plt.imshow(largeimg(D, np.ones_like(D)), aspect='auto', cmap=cmap)
     plt.show()
-    """
 
-    testKS_Diffusion(ks, pd = (32, 32), nsamples=(75, 50),
-        dMaxSqr=1, delta=3, rank=2, maxeigs=10, jacfac=10, noisefac=0.001,
-        rotate=False, use_rotinvariant=False, do_mahalanobis=True)
+    ks.makeVideo(Y, D, skip=1, cmap=cmap, colorvar=Xs)
+
+
+if __name__ == '__main__':
+    #testKS_VerticalOnly()
+    #"""
+    fac = 0.5
+    ks = KSSimulation(co_rotating=False, scale=(fac/2, fac/2))
+    ks.I = ks.I[0:225, :]
+    testKS_Diffusion(ks, pd = (64, 64), nsamples=2000,
+        dMaxSqr=20, delta=2, rank=2, maxeigs=15, jacfac=1, noisefac=0.001,
+        rotate=False, use_rotinvariant=False, \
+        do_mahalanobis=True, do_tda=True, do_video=True)
+    #"""
     #testKS_Variations(ks)
     #testKS_Rotations(ks)

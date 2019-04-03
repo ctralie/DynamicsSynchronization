@@ -15,13 +15,17 @@ from DiffusionMaps import *
 from Mahalanobis import *
 from LocalPCA import *
 from PatchDescriptors import *
+import subprocess
 
 imresize = lambda x, M, N: skimage.transform.resize(x, (M, N), anti_aliasing=True, mode='reflect')
-def largeimg(D, limit=20000):
+def largeimg(D, mask, limit=1000):
     res = max(D.shape[0], D.shape[1])
     if res > limit:
         fac = float(limit)/res
-        return imresize(D, int(fac*D.shape[0]), int(fac*D.shape[1]))
+        maskD = imresize(mask, int(fac*D.shape[0]), int(fac*mask.shape[1]))
+        retD = imresize(D, int(fac*D.shape[0]), int(fac*D.shape[1]))
+        retD[maskD < 0.01] = np.inf
+        return retD
     return D
 
 def even_interval(k):
@@ -91,6 +95,9 @@ class PDE2D(object):
         self.I = np.array([[]])
         self.periodic = True
         self.mc = None
+        self.f_pointwise = lambda x: x
+        self.f_patch = lambda x: x
+        self.pca = None
 
     def copy(self):
         """
@@ -171,6 +178,30 @@ class PDE2D(object):
         self.pca = None
         self.rotate_patches = False
 
+    def completeObservations(self):
+        """
+        Sample all of the patches once their positions and orientations
+        have been fixed
+        """
+        tic = time.time()
+        f_interp = self.getInterpolator()
+        pdx, pdt = np.meshgrid(even_interval(self.pd[1]), -even_interval(self.pd[0]))
+        pdx = pdx.flatten()
+        pdt = pdt.flatten()
+        ts = np.zeros((self.Xs.size, pdt.size))
+        xs = np.zeros((self.Xs.size, pdx.size))
+
+        # Setup all coordinate locations to sample
+        cs, ss = np.cos(self.thetas), np.sin(self.thetas)
+        xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdt[None, :] + self.Xs[:, None]
+        ts = ss[:, None]*pdx[None, :] + cs[:, None]*pdt[None, :] + self.Ts[:, None]
+        
+        # Use interpolator to sample coordinates for all patches
+        patches = (f_interp(ts.flatten(), xs.flatten(), grid=False))
+        patches = np.reshape(patches, ts.shape)
+        self.patches = self.f_patch(self.f_pointwise(patches))
+        print("Elapsed time patch sampling: %.3g"%(time.time()-tic))
+
     def makeObservations(self, pd, nsamples, uniform=True, periodic=True, rotate = False, \
                             buff = 0.0, f_pointwise = lambda x: x, f_patch = lambda x: x):
         """
@@ -195,9 +226,7 @@ class PDE2D(object):
         f_pointwise: function ndarray->ndarray
             A pointwise homeomorphism to apply to pixels in the observation function
         """
-        tic = time.time()
         self.periodic = periodic
-        f_interp = self.getInterpolator()
         # Make sure a rotated patch is within the time range
         # (we usually don't have to worry about space since it's periodic)
         rotstr = ""
@@ -209,7 +238,7 @@ class PDE2D(object):
             r = pd[0]/2.0
             self.rotate_patches = False
         r += buff
-        print("Making %s%s observations of dimension %s..."%(nsamples, rotstr, pd))
+        print("Making %s%s observations of dimension %s on a grid of %s..."%(nsamples, rotstr, pd, self.I.shape))
         self.pd = pd
         self.f_pointwise = f_pointwise
         self.f_patch = f_patch
@@ -245,24 +274,10 @@ class PDE2D(object):
             self.thetas = np.random.rand(self.Xs.size)*2*np.pi
         else:
             self.thetas = np.zeros_like(self.Xs)
-
-        # Now sample all patches
-        pdx, pdt = np.meshgrid(even_interval(pd[1]), -even_interval(pd[0]))
-        pdx = pdx.flatten()
-        pdt = pdt.flatten()
-        ts = np.zeros((self.Xs.size, pdt.size))
-        xs = np.zeros((self.Xs.size, pdx.size))
-
-        # Setup all coordinate locations to sample
-        cs, ss = np.cos(self.thetas), np.sin(self.thetas)
-        xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdt[None, :] + self.Xs[:, None]
-        ts = ss[:, None]*pdx[None, :] + cs[:, None]*pdt[None, :] + self.Ts[:, None]
         
-        # Use interpolator to sample coordinates for all patches
-        patches = (f_interp(ts.flatten(), xs.flatten(), grid=False))
-        patches = np.reshape(patches, ts.shape)
-        self.patches = f_patch(f_pointwise(patches))
-        print("Elapsed time patch sampling: %.3g"%(time.time()-tic))
+        self.completeObservations()
+
+
 
     def get_mahalanobis_ellipsoid(self, idx, delta, n_points):
         # function(ndarray(d) x0, int idx, float delta, int n_points) -> ndarray(n_points, d)
@@ -449,12 +464,13 @@ class PDE2D(object):
                 plt.imshow(p, interpolation='none', cmap='RdGy', vmin=np.min(self.I), vmax=np.max(self.I))
                 plt.savefig("%i.png"%i, bbox_inches='tight')
 
-    def makeVideo(self, Y, D = np.array([]), skip=20, cmap='magma_r'):
+    def makeVideo(self, Y, D = np.array([]), skip=20, cmap='magma_r', colorvar=np.array([])):
         """
         Make a video given a nonlinear dimension reduction, which
         is assumed to be indexed parallel to the patches
         """
-        colorvar = self.Xs
+        if colorvar.size == 0:
+            colorvar = self.Xs
         c = plt.get_cmap(cmap)
         C = c(np.array(np.round(255.0*colorvar/np.max(colorvar)), dtype=np.int32))
         C = C[:, 0:3]
@@ -514,18 +530,19 @@ class PDE2D(object):
             if D.size > 0:
                 plt.subplot(233)
                 plt.imshow(D, cmap='magma_r', interpolation='none')
+                fac = float(D.shape[0])/Y.shape[0]
 
-                plt.plot([i, i], [0, N], 'c')
-                plt.plot([0, N], [i, i], 'c')
-                plt.xlim([0, N])
-                plt.ylim([N, 0])
+                plt.plot([fac*i, fac*i], [0, D.shape[1]], 'c')
+                plt.plot([0, D.shape[1]], [fac*i, fac*i], 'c')
+                plt.xlim([0, D.shape[1]])
+                plt.ylim([D.shape[1], 0])
 
             plt.savefig("%i.png"%idx)
             idx += 1
 
 
 
-def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, delta=2, rotate=False, do_mahalanobis=True, rank=2, jacfac=1.0, maxeigs=2, periodic=False, cmap='magma_r', pca_dim = None, precomputed_samples = None, do_plot=False):
+def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, delta=2, rotate=False, do_mahalanobis=True, rank=2, jacfac=1.0, maxeigs=2, periodic=False, cmap='magma_r', pca_dim = None, precomputed_samples = None, do_plot=True, do_tda = False, do_video = False):
     f_patch = lambda x: x
     delta_theta = 0.1
     if rotate:
@@ -542,6 +559,11 @@ def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, d
     if do_mahalanobis:
         if pca_dim:
             pde.compose_with_dimreduction(dim=pca_dim)
+            #print(pde.pca.variance_explained_ratio_)
+            ax = plt.gcf().add_subplot(111, projection='3d')
+            X = pde.patches
+            ax.scatter(X[:, 0], X[:, 1], X[:, 2], c=pde.Ts)
+            plt.show()
         if precomputed_samples:
             other = PDE2D()
             other.I = np.array(pde.I)
@@ -553,7 +575,7 @@ def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, d
             fn_ellipsoid = lambda idx, delta, n_points: pde.get_mahalanobis_ellipsoid_from_precomputed(other, idx, delta, n_points, delta_theta, True)
         else:
             fn_ellipsoid = pde.get_mahalanobis_ellipsoid
-        res = getMahalanobisDists(pde.patches, fn_ellipsoid, delta, n_points=100, rank=rank, jacfac=jacfac, maxeigs=maxeigs)
+        res = getMahalanobisDists(pde.patches, fn_ellipsoid, delta, n_points=30, rank=rank, jacfac=jacfac, maxeigs=maxeigs)
         sio.savemat("DSqr.mat", res)
         res = sio.loadmat("DSqr.mat")
         DSqr, mask = res["gamma"], res["mask"]
@@ -563,29 +585,48 @@ def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, d
     DSqr[DSqr < 0] = 0
 
     D = np.sqrt(DSqr)
-    D[mask == 0] = np.inf
     Y = doDiffusionMaps(DSqr, Xs, dMaxSqr, do_plot=False, mask=mask, neigs=8)
+    subprocess.call(["espeak", "Finished"])
 
     if do_plot:
-        fig = plt.figure(figsize=(18, 6))
-        if Y.shape[1] > 2:
-            ax = fig.add_subplot(131, projection='3d')
-            ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=Xs, cmap=cmap)
-        else:
-            plt.subplot(131)
-            plt.scatter(Y[:, 0], Y[:, 1], c=Xs, cmap=cmap)
-        plt.title("X")
-        if Y.shape[1] > 2:
-            ax = fig.add_subplot(132, projection='3d')
-            ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=Ts, cmap=cmap)
-        else:
-            plt.subplot(132)
-            plt.scatter(Y[:, 0], Y[:, 1], c=Ts, cmap=cmap)
-        plt.title("T")
-        plt.subplot(133)
-        plt.imshow(largeimg(D), aspect='auto', cmap=cmap)
+        plt.figure(figsize=(24, 12))
+        plt.subplot(241)
+        plt.scatter(Y[:, 0], Y[:, 1], c=Xs, cmap=cmap)
+        plt.title("Diffusion 1 and 2, by X")
+        plt.subplot(242)
+        plt.scatter(Y[:, 2], Y[:, 3], c=Xs, cmap=cmap)
+        plt.title("Diffusion 3 and 4, by X")
+        ax = plt.gcf().add_subplot(243, projection='3d')
+        ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=Xs, cmap=cmap)
+        plt.title("Diffusion 1,2,3 by X")
+        plt.subplot(245)
+        plt.scatter(Y[:, 0], Y[:, 1], c=Ts, cmap=cmap)
+        plt.title("Diffusion 1 and 2, by T")
+        plt.subplot(246)
+        plt.scatter(Y[:, 2], Y[:, 3], c=Ts, cmap=cmap)
+        plt.title("Diffusion 3 and 4, by T")
+        ax = plt.gcf().add_subplot(247, projection='3d')
+        ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=Ts, cmap=cmap)
+        plt.title("Diffusion 1,2,3 by X")
+        plt.subplot(244)
+        plt.imshow(largeimg(D, mask), cmap=cmap)
+        plt.title("Mahalanobis Masked")
+        plt.subplot(248)
+        plt.imshow(largeimg(getSSM(Y), np.ones_like(mask)), cmap=cmap)
+        plt.title("Diffusion Map SSM")
         plt.show()
 
-        pde.makeVideo(Y, D, skip=1, cmap=cmap)
+    if do_tda:
+        from ripser import ripser
+        from persim import plot_diagrams as plot_dgms
+        perm, lambdas = getGreedyPerm(Y, 600)
+        plt.figure()
+        dgms = ripser(Y[perm, 0:4], maxdim=2)["dgms"]
+        plot_dgms(dgms, show=False)
+        plt.show()
+
+
+    if do_video:
+        pde.makeVideo(Y, largeimg(getSSM(Y), np.ones_like(mask)), skip=1, cmap=cmap)
     
     return Y

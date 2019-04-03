@@ -199,32 +199,6 @@ def get_rotation_lowrank(X, Y, scale_norm=True):
     return Cx.flatten(), Cy.flatten(), U, VT, rank
 
 
-def get_2d_coverage_image(X, Y, N, xlims=[0, 1], ylims=[0, 1]):
-    """
-    Return an image which is a rasterized version
-    of an indicator function of Xs and Ts
-    Parameters
-    ----------
-    X: ndarray(N)
-        X locations
-    Y: ndarray(N)
-        Y locations
-    N: int
-        Resolution of image
-    """
-    I = np.zeros((N, N))
-    X -= xlims[0]
-    X /= xlims[1]
-    X = np.array(np.round(X*N), dtype=int)
-    X[X >= N] = N-1
-    Y -= ylims[0]
-    Y /= ylims[1]
-    Y = np.array(np.round(Y*N), dtype=int)
-    Y[Y >= N] = N-1
-    I[Y, X] = 1
-    return I
-
-
 
 def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10, scale_norm=True, do_plot=False, cmap='magma_r'):
     """
@@ -275,7 +249,6 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
     
     D1 = getSSM(Y1)
     get_rmse = lambda idx: np.sqrt(np.mean((D1-getSSM(Y2[idx, :]))**2))
-    covdim = int(0.7*np.sqrt(D1.shape[0]))
 
     ## Step 1: If some correspondences are provided, use them
     # to help come up with a good initial guess
@@ -313,10 +286,8 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
         # correspondences is sufficient, then that's as 
         # good a guess as any
         initial_guesses = 1
-    max_cov = 0
-    idxMax = []
-    final_covs = np.zeros(initial_guesses)
-    final_rmses = np.zeros(initial_guesses)
+    min_rmse = np.inf
+    idxMin = []
     for i in range(initial_guesses):
         S = np.eye(dim)
         if rank < dim:
@@ -332,35 +303,30 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
         CxList, CyList, RxList, idxList = doICP(Y1i, Y2i, MaxIters=100)
         Xs = pde2.Xs[idxList[-1]]
         Ts = pde2.Ts[idxList[-1]]
-        cov_img = get_2d_coverage_image(Xs, Ts, covdim)
-        cov = np.sum(cov_img)/float(cov_img.size)
-        final_covs[i] = cov
-        final_rmses[i] = get_rmse(idxList[-1])
-        print("cov=%.3g, rmse=%.3g"%(final_covs[i], final_rmses[i]))
-        if cov > max_cov:
-            max_cov = cov
-            idxMax = idxList
-    # Scatterplot relationship between RMSE and coverage
-    plt.figure()
-    plt.scatter(final_rmses, final_covs)
-    plt.xlabel("RMSE")
-    plt.ylabel("Coverage")
-    plt.title("RMSE vs Coverage")
-    plt.savefig("RMSE_Vs_Coverage.png", bbox_inches='tight')
+        rmse = get_rmse(idxList[-1])
+        print("rmse=%.3g"%rmse)
+        if rmse < min_rmse:
+            min_rmse = rmse
+            idxMin = idxList
 
     # Compute RMEs for each step of the best match
-    rmses_iter = np.zeros(len(idxMax))
-    for i, idx in enumerate(idxMax):
+    rmses_iter = np.zeros(len(idxMin))
+    for i, idx in enumerate(idxMin):
         D2 = getSSM(Y2[idx, :])
         rmses_iter[i] = get_rmse(idx)
     
     ## Step 3: Plot the iterations of the best match
+
+    # Get values of solution image near patch centers
+    # for plotting
+    f_interp = pde1.getInterpolator()
+    patch_centers = f_interp(pde1.Ts.flatten(), pde1.Xs.flatten(), grid=False)
+
     if do_plot:
         plt.figure(figsize=(15, 15))
-        for i, idx in enumerate(idxMax):
+        for i, idx in enumerate(idxMin):
             Xs = pde2.Xs[idx]
             Ts = pde2.Ts[idx]
-            cov_img = get_2d_coverage_image(Xs, Ts, covdim)
             plt.clf()
             idx = np.array(idx)
             plt.subplot(331)
@@ -373,7 +339,7 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
             plt.plot(rmses_iter)
             plt.scatter([i], [rmses_iter[i]])
             plt.xlabel("Iteration number")
-            plt.title("ICP Convergence")
+            plt.title("ICP Iteration %i, RMSE=%.3g"%(i, rmses_iter[i]))
             plt.ylabel("RMSE")
             plt.subplot(334)
             plt.scatter(Xs, Ts, c=pde1.Xs, cmap=cmap)
@@ -387,9 +353,8 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
             plt.title("Xs, Ts, Colored By Loc T")
             D2 = getSSM(Y2[idx, :])
             plt.subplot(336)
-            plt.imshow(cov_img)
-            plt.gca().invert_yaxis()
-            plt.title("%.3g %% Coverage"%(100*np.sum(cov_img)/float(cov_img.size)))
+            plt.scatter(Xs, Ts, c=patch_centers, cmap='RdGy')
+            plt.title("Patch Centers")
             plt.subplot(337)
             plt.imshow(D1, cmap=cmap)
             plt.title("D1 Mahalanobis")
@@ -405,4 +370,4 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
             plt.tight_layout()
             plt.savefig("ICP%i.png"%i, bbox_inches='tight')
     
-    return {'idxMax':idxMax, 'final_covs':final_covs, 'final_rmses':final_rmses}
+    return {'idxMin':idxMin, 'rmses_iter':rmses_iter}

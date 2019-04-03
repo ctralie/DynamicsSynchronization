@@ -162,11 +162,9 @@ def testKS_Alignment():
                     precomputed_samples=None, pca_dim=40, do_plot=True, do_tda=False, do_video=False)
 
     ## Step 3: Run alignment to ideal torus
-    n_correspondences = 0
     ft = FlatTorusIdeal(60, 60, Yks.shape[1])
     Yft = ft.Y
-    corresp = np.array([[]])
-    doICP_PDE2D(ks, Yks, ft, Yft, corresp, do_plot=True)
+    doICP_PDE2D(ks, Yks[:, 0:4], ft, Yft[:, 0:4], initial_guesses=10, do_plot=True)
 
 if __name__ == '__main__':
     #testKS_VerticalOnly()

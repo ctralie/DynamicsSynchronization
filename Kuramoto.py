@@ -5,10 +5,8 @@ from skimage.transform import resize
 from scipy.ndimage.filters import gaussian_filter1d as gf1d
 import matplotlib.pyplot as plt
 from PDE2D import *
-from PatchDescriptors import *
 from Mahalanobis import *
-from skimage.transform import hough_line, hough_line_peaks
-from scipy.interpolate import InterpolatedUnivariateSpline
+from SyntheticExamples import FlatTorusIdeal
 
 class KSSimulation(PDE2D):
     def __init__(self, co_rotating = False, scale=(1.0, 1.0)):
@@ -27,6 +25,8 @@ class KSSimulation(PDE2D):
         by an appropriate amount.  The slope of the rotation is estimated
         using the Hough Transform of a gradient magnitude image
         """
+        from skimage.transform import hough_line, hough_line_peaks
+        from scipy.interpolate import InterpolatedUnivariateSpline
         image = np.array(self.I)
         imx = gf1d(image, sigma=1, order=1, axis=0)
         imy = gf1d(image, sigma=1, order=1, axis=1)
@@ -68,16 +68,6 @@ class KSSimulation(PDE2D):
                         self.ts[-1], self.ts[0]))
         else:
             plt.imshow(self.I, interpolation='none', aspect='auto', cmap='RdGy')
-
-
-
-def testKS_Diffusion(pde, pd, nsamples, delta, rotate=False, use_rotinvariant = False, dMaxSqr=1.0, do_mahalanobis=False, rank=2, jacfac=1, maxeigs=10, noisefac=0.0, do_tda=False, do_video=False, cmap='magma_r'):
-    pde.I += noisefac*np.max(np.abs(pde.I))*np.random.randn(pde.I.shape[0], pde.I.shape[1])
-    testMahalanobis_PDE2D(pde, pd=pd, nsamples=nsamples, \
-                    dMaxSqr=dMaxSqr, delta=3, rank=2, maxeigs=maxeigs, jacfac=1,\
-                    periodic=True, rotate=rotate, use_rotinvariant=use_rotinvariant, \
-                    do_mahalanobis=do_mahalanobis, \
-                    precomputed_samples=None, pca_dim=40, do_plot=True, do_tda=do_tda, do_video=do_video)
 
 
 def testKS_Variations(ks):
@@ -153,16 +143,33 @@ def testKS_VerticalOnly():
     ks.makeVideo(Y, D, skip=1, cmap=cmap, colorvar=Xs)
 
 
-if __name__ == '__main__':
-    #testKS_VerticalOnly()
-    #"""
+def testKS_Alignment():
+    from ICP import doICP_PDE2D
+    ## Step 1: Setup stretched KS
+    # Setup to go through roughly 3 periods so it's easy to 
+    # come up with correspondences
     fac = 0.5
     ks = KSSimulation(co_rotating=False, scale=(fac*7, fac/2))
-    ks.I = ks.I[0:225, :]
-    testKS_Diffusion(ks, pd = (64, 64), nsamples=2000,
-        dMaxSqr=1000, delta=2, rank=2, maxeigs=20, jacfac=1, noisefac=0.001,
-        rotate=True, use_rotinvariant=True, \
-        do_mahalanobis=True, do_tda=True, do_video=True)
-    #"""
+    ks.I = ks.I[0:195, :]
+
+    ## Step 2: Run Mahalanobis on (rotated) patches
+    noisefac = 0.001
+    ks.I += noisefac*np.max(np.abs(ks.I))*np.random.randn(ks.I.shape[0], ks.I.shape[1])
+    Yks = testMahalanobis_PDE2D(ks, pd=(64, 64), nsamples=2000, \
+                    dMaxSqr=1000, delta=2, rank=2, maxeigs=20, jacfac=1,\
+                    periodic=True, rotate=True, use_rotinvariant=True, \
+                    do_mahalanobis=True, \
+                    precomputed_samples=None, pca_dim=40, do_plot=True, do_tda=False, do_video=False)
+
+    ## Step 3: Run alignment to ideal torus
+    n_correspondences = 0
+    ft = FlatTorusIdeal(60, 60, Yks.shape[1])
+    Yft = ft.Y
+    corresp = np.array([[]])
+    doICP_PDE2D(ks, Yks, ft, Yft, corresp, do_plot=True)
+
+if __name__ == '__main__':
+    #testKS_VerticalOnly()
     #testKS_Variations(ks)
     #testKS_Rotations(ks)
+    testKS_Alignment()

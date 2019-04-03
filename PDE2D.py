@@ -18,20 +18,22 @@ from PatchDescriptors import *
 import subprocess
 
 imresize = lambda x, M, N: skimage.transform.resize(x, (M, N), anti_aliasing=True, mode='reflect')
-def largeimg(D, mask, limit=1000):
+def largeimg(D, mask=np.array([]), limit=1000):
     """
-    Display an anti-aliased version of a masked image
+    Display an anti-aliased downsampled version of a (masked) image
     """
     res = max(D.shape[0], D.shape[1])
     if res > limit:
         fac = float(limit)/res
-        maskD = imresize(mask, int(fac*D.shape[0]), int(fac*mask.shape[1]))
         retD = imresize(D, int(fac*D.shape[0]), int(fac*D.shape[1]))
-        retD[maskD < 0.01] = np.inf
+        if mask.size > 0:
+            maskD = imresize(mask, int(fac*D.shape[0]), int(fac*mask.shape[1]))
+            retD[maskD < 0.01] = np.inf
         return retD
     else:
         retD = np.array(D)
-        retD[mask == 0] = np.inf
+        if mask.size > 0:
+            retD[mask == 0] = np.inf
         return retD
 
 def even_interval(k):
@@ -623,7 +625,7 @@ def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, d
         plt.imshow(largeimg(D, mask), cmap=cmap)
         plt.title("Mahalanobis Masked")
         plt.subplot(248)
-        plt.imshow(largeimg(getSSM(Y), np.ones_like(mask)), cmap=cmap)
+        plt.imshow(largeimg(getSSM(Y)), cmap=cmap)
         plt.title("Diffusion Map SSM")
         plt.show()
 
@@ -638,6 +640,6 @@ def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, d
 
 
     if do_video:
-        pde.makeVideo(Y, largeimg(getSSM(Y), np.ones_like(mask)), skip=1, cmap=cmap)
+        pde.makeVideo(Y, largeimg(getSSM(Y)), skip=1, cmap=cmap)
     
     return Y

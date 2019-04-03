@@ -39,7 +39,6 @@ def getCentroid(PC):
     #Take the mean across the rows, make it a column vector
     return np.mean(PC, 1)[:, None] 
 
-
 def getCorrespondences(X, Y, Cx, Cy, Rx):
     """
     Given an estimate of the aligning matrix Rx that aligns
@@ -167,7 +166,7 @@ def doICP(X, Y, MaxIters, verbose=False):
             print("Finished iteration %i"%i)
     return (CxList, CyList, RxList, idxList)
 
-def get_rotation_lowrank(X, Y):
+def get_rotation_lowrank(X, Y, scale_norm=True):
     """
     Handle the case where there may or may not be 
     enough correspondences to determine a full rank
@@ -188,8 +187,6 @@ def get_rotation_lowrank(X, Y):
         Estimated rank of SVD
     """
     dim = X.shape[0]
-    R, _, _ = np.linalg.svd(np.random.randn(dim, dim))
-    Y = R.dot(X)
     Cx = getCentroid(X)
     Cy = getCentroid(Y)
     XC = X - Cx
@@ -202,7 +199,34 @@ def get_rotation_lowrank(X, Y):
     return Cx.flatten(), Cy.flatten(), U, VT, rank
 
 
-def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10, do_plot=False):
+def get_2d_coverage_image(X, Y, N, xlims=[0, 1], ylims=[0, 1]):
+    """
+    Return an image which is a rasterized version
+    of an indicator function of Xs and Ts
+    Parameters
+    ----------
+    X: ndarray(N)
+        X locations
+    Y: ndarray(N)
+        Y locations
+    N: int
+        Resolution of image
+    """
+    I = np.zeros((N, N))
+    X -= xlims[0]
+    X /= xlims[1]
+    X = np.array(np.round(X*N), dtype=int)
+    X[X >= N] = N-1
+    Y -= ylims[0]
+    Y /= ylims[1]
+    Y = np.array(np.round(Y*N), dtype=int)
+    Y[Y >= N] = N-1
+    I[Y, X] = 1
+    return I
+
+
+
+def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10, scale_norm=True, do_plot=False, cmap='magma_r'):
     """
     Do ICP on a set of observations from a PDE
     Parameters
@@ -219,10 +243,17 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
         A list of L correspondences
     initial_guesses: int
         Number of initial guesses to take
+    scale_norm: boolean
+        RMS Normalize point clouds for scale
     do_plot: boolean
         Whether to plot correspondence plot and ICP iterations
     """
     from DiffusionMaps import getSSM
+    if scale_norm:
+        Y1 -= np.mean(Y1, 0)[None, :]
+        Y1 /= np.sqrt(np.mean(np.sum(Y1**2, 1)))
+        Y2 -= np.mean(Y2, 0)[None, :]
+        Y2 /= np.sqrt(np.mean(np.sum(Y2**2, 1)))
     dim = Y2.shape[1]
     D1 = getSSM(Y1)
     D2 = getSSM(Y2)
@@ -243,11 +274,12 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
     plt.savefig("Observations.png", bbox_inches='tight')
     
     D1 = getSSM(Y1)
-    get_rmse = lambda idx: np.sqrt(np.mean((D1-getSSM(Y2[idx, :])**2)))
+    get_rmse = lambda idx: np.sqrt(np.mean((D1-getSSM(Y2[idx, :]))**2))
+    covdim = int(0.7*np.sqrt(D1.shape[0]))
 
-    if corresp.shape[0] > 0:
-        # If some correspondences are provided, use them
-        # to help come up with a good initial guess
+    ## Step 1: If some correspondences are provided, use them
+    # to help come up with a good initial guess
+    if corresp.size > 0:
         idx1 = corresp[:, 0]
         idx2 = corresp[:, 1]
         y1 = Y1[idx1, :]
@@ -275,14 +307,16 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
         VT = np.eye(dim)
         rank = 0
 
-    # Now try a bunch of different initial guesses
+    ## Step 2: Try a bunch of different initial guesses
     if rank == dim:
         # If the rank of the estimated rotation using
         # correspondences is sufficient, then that's as 
         # good a guess as any
         initial_guesses = 1
-    min_rmse = np.inf
-    idxsMin = []
+    max_cov = 0
+    idxMax = []
+    final_covs = np.zeros(initial_guesses)
+    final_rmses = np.zeros(initial_guesses)
     for i in range(initial_guesses):
         S = np.eye(dim)
         if rank < dim:
@@ -296,49 +330,79 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
         Y2i = (Y2 - C2[None, :]).T
         Y1i = R.dot(Y1i)
         CxList, CyList, RxList, idxList = doICP(Y1i, Y2i, MaxIters=100)
-        rmse = get_rmse(idxList[-1])
-        print(rmse)
-        if rmse < min_rmse:
-            min_rmse = rmse
-            idxsMin = idxList
-    
-    rmses = np.zeros(len(idxList))
-    for i, idx in enumerate(idxList):
+        Xs = pde2.Xs[idxList[-1]]
+        Ts = pde2.Ts[idxList[-1]]
+        cov_img = get_2d_coverage_image(Xs, Ts, covdim)
+        cov = np.sum(cov_img)/float(cov_img.size)
+        final_covs[i] = cov
+        final_rmses[i] = get_rmse(idxList[-1])
+        print("cov=%.3g, rmse=%.3g"%(final_covs[i], final_rmses[i]))
+        if cov > max_cov:
+            max_cov = cov
+            idxMax = idxList
+    # Scatterplot relationship between RMSE and coverage
+    plt.figure()
+    plt.scatter(final_rmses, final_covs)
+    plt.xlabel("RMSE")
+    plt.ylabel("Coverage")
+    plt.title("RMSE vs Coverage")
+    plt.savefig("RMSE_Vs_Coverage.png", bbox_inches='tight')
+
+    # Compute RMEs for each step of the best match
+    rmses_iter = np.zeros(len(idxMax))
+    for i, idx in enumerate(idxMax):
         D2 = getSSM(Y2[idx, :])
-        rmses[i] = get_rmse(idx)
+        rmses_iter[i] = get_rmse(idx)
     
+    ## Step 3: Plot the iterations of the best match
     if do_plot:
-        plt.figure(figsize=(15, 10))
-        for i, idx in enumerate(idxList):
+        plt.figure(figsize=(15, 15))
+        for i, idx in enumerate(idxMax):
+            Xs = pde2.Xs[idx]
+            Ts = pde2.Ts[idx]
+            cov_img = get_2d_coverage_image(Xs, Ts, covdim)
             plt.clf()
             idx = np.array(idx)
-            plt.subplot(231)
-            plt.scatter(pde1.Xs, pde1.Ts, c=pde2.Xs[idx])
-            plt.title("Xs")
-            plt.subplot(232)
-            plt.scatter(pde1.Xs, pde1.Ts, c=pde2.Ts[idx])
-            plt.title("Ts")
-            plt.subplot(233)
-            plt.plot(rmses)
-            plt.scatter([i], [rmses[i]])
+            plt.subplot(331)
+            plt.scatter(pde1.Xs, pde1.Ts, c=Xs, cmap=cmap)
+            plt.title("Patch Locs Colored By Xs")
+            plt.subplot(332)
+            plt.scatter(pde1.Xs, pde1.Ts, c=Ts, cmap=cmap)
+            plt.title("Patch Locs Colored by Ts")
+            plt.subplot(333)
+            plt.plot(rmses_iter)
+            plt.scatter([i], [rmses_iter[i]])
             plt.xlabel("Iteration number")
             plt.title("ICP Convergence")
             plt.ylabel("RMSE")
-
+            plt.subplot(334)
+            plt.scatter(Xs, Ts, c=pde1.Xs, cmap=cmap)
+            plt.xlabel("Xs Flat Torus")
+            plt.ylabel("Ts Flat Torus")
+            plt.title("Xs, Ts, Colored By Loc X")
+            plt.subplot(335)
+            plt.scatter(Xs, Ts, c=pde1.Ts, cmap=cmap)
+            plt.xlabel("Xs Flat Torus")
+            plt.ylabel("Ts Flat Torus")
+            plt.title("Xs, Ts, Colored By Loc T")
             D2 = getSSM(Y2[idx, :])
-            plt.subplot(234)
-            plt.imshow(D1)
+            plt.subplot(336)
+            plt.imshow(cov_img)
+            plt.gca().invert_yaxis()
+            plt.title("%.3g %% Coverage"%(100*np.sum(cov_img)/float(cov_img.size)))
+            plt.subplot(337)
+            plt.imshow(D1, cmap=cmap)
             plt.title("D1 Mahalanobis")
             plt.colorbar()
-            plt.subplot(235)
-            plt.imshow(D2)
+            plt.subplot(338)
+            plt.imshow(D2, cmap=cmap)
             plt.colorbar()
             plt.title("D2 Mahalanobis Iter %i"%i)
-            plt.subplot(236)
-            plt.imshow(D1-D2)
+            plt.subplot(339)
+            plt.imshow(D1-D2, cmap=cmap)
             plt.colorbar()
-            plt.title("Difference (RMSE=%.3g)"%rmses[i])
+            plt.title("Difference (RMSE=%.3g)"%rmses_iter[i])
             plt.tight_layout()
             plt.savefig("ICP%i.png"%i, bbox_inches='tight')
     
-    return idxList[-1]
+    return {'idxMax':idxMax, 'final_covs':final_covs, 'final_rmses':final_rmses}

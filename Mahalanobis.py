@@ -68,7 +68,6 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
         if verbose and i%100 == 0:
             print("%i of %i"%(i, N))
         Y = fn_ellipsoid(i, delta, n_points)
-        tic = time.time()
         C = (Y.T).dot(Y)
         w, v = slinalg.eigh(C, eigvals=(C.shape[1]-maxeigs, C.shape[1]-1))
         # Put largest eigenvectors first

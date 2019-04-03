@@ -119,7 +119,8 @@ def get_pc_histograms(patches, n_bins=50, n_pcs=3):
     pca = PCA(n_components=n_pcs)
     return pca.fit_transform(H)
 
-def get_ftm2d_polar(patches, pd, res=32, r_max = None):
+np.warnings.filterwarnings('ignore')
+def get_ftm2d_polar(patches, pd, res=32, r_max = None, verbose=False):
     """
     Calculate the magnitude of the 2D fourier transform of
     polar coordinates
@@ -134,12 +135,16 @@ def get_ftm2d_polar(patches, pd, res=32, r_max = None):
     r_max: float
         The max radius up to which to go.  If None,
         then take the radius to be sqrt((pd[0]/2)^2 + (pd[1]/2)^2)
+    verbose: boolean
+        Print timing and other info
     """
-    print("Getting FTM2D polar descriptors...")
+    if verbose:
+        print("Getting FTM2D polar descriptors...")
     tic = time.time()
     if not r_max:
         r_max = float(min(pd[0], pd[1]))/2.0
-    print("r_max = %.3g"%r_max)
+    if verbose:
+        print("r_max = %.3g"%r_max)
     N = patches.shape[0]
     pixx = np.arange(pd[1]) - float(pd[1])/2
     pixy = np.arange(pd[0]) - float(pd[0])/2
@@ -155,7 +160,8 @@ def get_ftm2d_polar(patches, pd, res=32, r_max = None):
         polar = f(xs, ys, grid=False)
         polar = np.reshape(polar, (res, res))
         ftm2d_polar[i, :] = np.abs(fft2(polar)).flatten()
-    print("Elapsed Time: %.3g"%(time.time()-tic))
+    if verbose:
+        print("Elapsed Time: %.3g"%(time.time()-tic))
     return ftm2d_polar
 
 def get_scattering(patches, pd, J=4, L=8, rotinvariant=True):

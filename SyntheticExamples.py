@@ -98,6 +98,54 @@ class TorusMultiDist(PDE2D):
         plt.scatter(self.sites[:, 0]*self.N, self.sites[:, 1]*self.M)
 
 
+class FlatTorusIdeal(PDE2D):
+    def __init__(self, M, N, K, neighb_cutoff = 1, do_plot = False):
+        """
+        Construct a dummy 2D PDE whose intrinsic geometry is perfectly
+        sampled from the flat torus
+        Parameters
+        ----------
+        M: int
+            Number of samples along y (phi) in principal square
+        N: int
+            Number of samples along x (theta) in principal square
+        K: int
+            Dimension of diffusion maps space
+        Returns
+        -------
+        Y: ndarray(M*N, K)
+            Dimension reduced version of the points
+        """
+        tic = time.time()
+        self.I = np.array([[]]) # Dummy variable for PDE grid
+        phi = np.linspace(0, 1, M+1)[0:M]
+        theta = np.linspace(0, 1, N+1)[0:N]
+        theta, phi = np.meshgrid(theta, phi)
+        theta = theta.flatten()
+        phi = phi.flatten()
+        self.Xs = theta
+        self.Ts = phi
+        dx = np.abs(theta[:, None]-theta[None, :])
+        dx = np.minimum(dx, np.abs(theta[:, None]+1-theta[None, :]))
+        dx = np.minimum(dx, np.abs(theta[:, None]-1-theta[None, :]))
+        dy = np.abs(phi[:, None]-phi[None, :])
+        dy = np.minimum(dy, np.abs(phi[:, None]+1-phi[None, :]))
+        dy = np.minimum(dy, np.abs(phi[:, None]-1-phi[None, :]))
+        DSqr = dx**2 + dy**2
+        DSqr[DSqr < 0] = 0
+        mask = np.ones_like(DSqr)
+        mask[np.abs(dx) > neighb_cutoff] = 0
+        mask[np.abs(dy) > neighb_cutoff] = 0
+        Y = doDiffusionMaps(DSqr, theta, mask=mask, neigs=K+1, do_plot=do_plot)
+        if do_plot:
+            plt.figure(figsize=(12, 6))
+            plt.subplot(121)
+            plt.imshow(largeimg(DSqr), cmap='magma_r')
+            plt.subplot(122)
+            plt.imshow(largeimg(getSSM(Y)), cmap='magma_r')
+            plt.show()
+        self.Y = Y
+
 def testICP(noisefac = 0.001, maxeigs=40, delta=3, \
             jacfac=1, dMaxSqr=10, pca_dim=60, \
             nsamples1 = (30, 30), nsamples2 = (30, 30), \
@@ -107,13 +155,15 @@ def testICP(noisefac = 0.001, maxeigs=40, delta=3, \
     Align a set of observations to another set of observations using ICP
     """
     np.random.seed(seed)
-    pde1 = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=2)
+    M = 50
+    N = 100
+    pde1 = TorusDist(M, N, (0.2, 0.2), tile_y=2, lp=2)
     pde1.I += noisefac*np.random.randn(pde1.I.shape[0], pde1.I.shape[1])
     Y1 = testMahalanobis_PDE2D(pde1, pd=pd1, nsamples=nsamples1, \
                     dMaxSqr=dMaxSqr, delta=delta, rank=2, \
                     maxeigs=maxeigs, jacfac=jacfac, pca_dim=pca_dim, \
                     periodic=True, rotate=False, do_mahalanobis=True)
-    pde2 = TorusDist(50, 100, (0.2, 0.2), tile_y=2, lp=1)
+    pde2 = TorusDist(M, N, (0.2, 0.2), tile_y=2, lp=1)
     pde2.I += noisefac*np.random.randn(pde2.I.shape[0], pde2.I.shape[1])
     Y2 = testMahalanobis_PDE2D(pde2, pd=pd2, nsamples=nsamples2, \
                     dMaxSqr=dMaxSqr, delta=delta, rank=2, \
@@ -153,8 +203,9 @@ def testTorusMahalanobis():
 if __name__ == '__main__':
     #testTorusMahalanobis()
     #testCylinderMahalanobis()
-    #"""
+    """
     testICP(nsamples1=1000, nsamples2=2000, noisefac = 0.001, \
             maxeigs=10, delta=2, jacfac=1, pca_dim=60, dMaxSqr=10, \
             n_correspondences=4, initial_guesses=10, seed=0)
-    #"""
+    """
+    f = FlatTorusIdeal(60, 60, 8, do_plot=True)

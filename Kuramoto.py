@@ -13,31 +13,25 @@ class KSSimulation(PDE2D):
         PDE2D.__init__(self)
         res = sio.loadmat("KS.mat")
         self.I = res["data"]
+        self.c = res["c"] # Traveling wave factor
         M, N = self.I.shape[0], self.I.shape[1]
         if co_rotating:
             self.make_corotating()
         self.I = resize(self.I, (M*scale[0], N*scale[1]), anti_aliasing=True, mode='reflect')
         self.ts = np.linspace(res["tmin"].flatten(), res["tmax"].flatten(), M)
+        self.xs = np.linspace(0, 2*np.pi, self.I.shape[1]+1)[0:self.I.shape[1]]
+    
+    def crop(self, t0, t1, x0, x1):
+        self.I = self.I[t0:t1, x0:x1]
+        self.ts = self.ts[t0:t1]
+        self.xs = self.xs[x0:x1]
     
     def make_corotating(self, do_plot=False):
         """
         Warp into a co-rotating frame by circularly shifting each time slice
-        by an appropriate amount.  The slope of the rotation is estimated
-        using the Hough Transform of a gradient magnitude image
+        by an appropriate amount
         """
-        from skimage.transform import hough_line, hough_line_peaks
-        from scipy.interpolate import InterpolatedUnivariateSpline
-        image = np.array(self.I)
-        imx = gf1d(image, sigma=1, order=1, axis=0)
-        imy = gf1d(image, sigma=1, order=1, axis=1)
-        image = np.sqrt(imx**2 + imy**2)
-        q = np.quantile(image.flatten(), 0.9)
-        image[image < q] = 0
-        h, theta, d = hough_line(image)
-        angles = []
-        for _, angle, _ in zip(*hough_line_peaks(h, theta, d)):
-            angles.append(angle)
-        angle = np.median(angles)
+        ratio = self.c
         INew = np.array(self.I)
         N = self.I.shape[1]
         for i in range(1, self.I.shape[0]):
@@ -46,28 +40,37 @@ class KSSimulation(PDE2D):
             x = self.I[i, :]
             x = np.concatenate((x, x, x))
             spl = InterpolatedUnivariateSpline(pix, x)
-            INew[i, :] = spl((np.arange(N) - i*np.tan(angle)) % N)
-        if do_plot:
-            plt.figure(figsize=(12, 6))
-            plt.subplot(121)
-            plt.imshow(self.I, cmap='gray')
-            dx = np.cos(angle)
-            dy = np.sin(angle)
-            plt.plot([0, -dy*INew.shape[1]], [0, dx*INew.shape[1]], 'r')
-            plt.title("Original")
-            plt.subplot(122)
-            plt.imshow(INew, cmap="gray")
-            plt.title("Co-Rotating")
-            plt.show()
+            INew[i, :] = spl((np.arange(N) + i*ratio) % N)
         self.I = INew
 
     def drawSolutionImage(self, time_extent = False):
         if time_extent:
-            plt.imshow(self.I, interpolation='none', aspect='auto', \
-                        cmap='RdGy', extent=(0, self.I.shape[1], \
-                        self.ts[-1], self.ts[0]))
+            m = np.max(np.abs(self.I))
+            plt.imshow(self.I, interpolation='nearest', aspect='auto', \
+                        cmap='RdGy', extent=(0, self.xs[-1], \
+                        self.ts[-1], self.ts[0]), vmin=-m, vmax=m)
         else:
-            plt.imshow(self.I, interpolation='none', aspect='auto', cmap='RdGy')
+            plt.imshow(self.I, interpolation='nearest', aspect='auto', cmap='RdGy')
+    
+    def makeTimeSeriesVideo(self):
+        plt.figure(figsize=(12, 4))
+        m = np.max(np.abs(self.I))
+        for i, idx in enumerate(range(0, self.I.shape[0], 10)):
+            plt.clf()
+            plt.subplot(121)
+            self.drawSolutionImage(True)
+            plt.colorbar()
+            plt.plot([0, 2*np.pi], [self.ts[idx]]*2)
+            plt.xlabel("Space (Radians)")
+            plt.ylabel("Time (Seconds)")
+            plt.title("Spacetime Grid")
+            plt.subplot(122)
+            plt.plot(self.xs, self.I[idx, :])
+            plt.ylim([-m*1.1, m*1.1])
+            plt.xlabel("Space (Radians)")
+            plt.title("Timeslice at %g Seconds"%self.ts[idx])
+            plt.savefig("%i.png"%i, bbox_inches='tight')
+
 
 
 def testKS_Variations(ks):
@@ -166,8 +169,13 @@ def testKS_Alignment():
     Yft = ft.Y
     doICP_PDE2D(ks, Yks[:, 0:4], ft, Yft[:, 0:4], initial_guesses=10, do_plot=True)
 
+def plotKS():
+    ks = KSSimulation(co_rotating=False)
+    ks.makeTimeSeriesVideo()
+
 if __name__ == '__main__':
     #testKS_VerticalOnly()
     #testKS_Variations(ks)
     #testKS_Rotations(ks)
     testKS_Alignment()
+    #plotKS()

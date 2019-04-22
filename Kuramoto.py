@@ -171,7 +171,9 @@ def testKS_Alignment():
 
 def plotKS():
     ks = KSSimulation(co_rotating=False)
-    ks.makeTimeSeriesVideo()
+    ks.makeObservations((64, 20), 100, rotate=True)
+    ks.plotPatches()
+    #ks.makeTimeSeriesVideo()
 
 if __name__ == '__main__':
     #testKS_VerticalOnly()

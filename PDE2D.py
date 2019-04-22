@@ -194,14 +194,14 @@ class PDE2D(object):
         """
         tic = time.time()
         f_interp = self.getInterpolator()
-        pdx, pdt = np.meshgrid(even_interval(self.pd[1]), -even_interval(self.pd[0]))
+        pdx, pdt = np.meshgrid(even_interval(self.pd[1]), even_interval(self.pd[0]))
         pdx = pdx.flatten()
         pdt = pdt.flatten()
         ts = np.zeros((self.Xs.size, pdt.size))
         xs = np.zeros((self.Xs.size, pdx.size))
 
         # Setup all coordinate locations to sample
-        cs, ss = np.cos(self.thetas), np.sin(self.thetas)
+        cs, ss = np.cos(-self.thetas), np.sin(-self.thetas) # Make CCW wrt "image coordinates"
         xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdt[None, :] + self.Xs[:, None]
         ts = ss[:, None]*pdx[None, :] + cs[:, None]*pdt[None, :] + self.Ts[:, None]
         
@@ -310,7 +310,7 @@ class PDE2D(object):
         ## Step 2: For each patch, sample near patches in a disc
         if not self.mc:
             # Cache patch coordinates and interpolator
-            pdx, pdt = np.meshgrid(even_interval(self.pd[1]), -even_interval(self.pd[0]))
+            pdx, pdt = np.meshgrid(even_interval(self.pd[1]), even_interval(self.pd[0]))
             pdx = pdx.flatten()
             pdt = pdt.flatten()
             f_interp = self.getInterpolator()
@@ -327,8 +327,8 @@ class PDE2D(object):
         thetasorient = np.zeros(n_points)
         if self.rotate_patches:
             thetasorient = 2*np.pi*np.random.rand(n_points)
-        cs = np.cos(thetasorient)
-        ss = np.sin(thetasorient)
+        cs = np.cos(-thetasorient)
+        ss = np.sin(-thetasorient)
         xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdt[None, :] + xc[:, None]
         ts = ss[:, None]*pdx[None, :] + cs[:, None]*pdt[None, :] + tc[:, None]
         patches = f_interp(ts.flatten(), xs.flatten(), grid=False)
@@ -404,7 +404,7 @@ class PDE2D(object):
             self.pca = pca
 
     
-    def plotPatchBoundary(self, i, draw_arrows=True):
+    def plotPatchBoundary(self, i, draw_arrows=True, flip_y = True):
         """
         Plot a rectangular outline of the ith patch
         along with arrows at its center indicating
@@ -413,13 +413,17 @@ class PDE2D(object):
         ----------
         i: int
             Index of patch
+        draw_arrows: boolean
+            Whether to draw a coordinate system in the patch
+        flip_y: boolean
+            Whether to flip the y arrow for the coordinate system
         """
         pdx = even_interval(self.pd[1])
         pdt = even_interval(self.pd[0])
         x0, x1 = pdx[0], pdx[-1]
         t0, t1 = pdt[0], pdt[-1]
         x = np.array([[x0, t0], [x0, t1], [x1, t1], [x1, t0], [x0, t0]])
-        c, s = np.cos(self.thetas[i]), np.sin(self.thetas[i])
+        c, s = np.cos(-self.thetas[i]), np.sin(-self.thetas[i])
         R = np.array([[c, -s], [s, c]])
         xc = self.Xs[i]
         tc = self.Ts[i]
@@ -428,6 +432,8 @@ class PDE2D(object):
         ax = plt.gca()
         R[:, 0] *= self.pd[1]/2
         R[:, 1] *= self.pd[0]/2
+        if flip_y:
+            R[:, 1] *= -1
         if draw_arrows:
             ax.arrow(xc, tc, R[0, 0], R[1, 0], head_width = 5, head_length = 3, fc = 'c', ec = 'c', width = 1)
             ax.arrow(xc, tc, R[0, 1], R[1, 1], head_width = 5, head_length = 3, fc = 'g', ec = 'g', width = 1)
@@ -469,6 +475,7 @@ class PDE2D(object):
                 plt.subplot(122)
                 p = self.get_patch(i)
                 plt.imshow(p, interpolation='none', cmap='RdGy', vmin=np.min(self.I), vmax=np.max(self.I))
+                plt.title("%.3g degrees"%(self.thetas[i]*180/np.pi))
                 plt.savefig("%i.png"%i, bbox_inches='tight')
 
     def makeVideo(self, Y, D = np.array([]), skip=20, cmap='magma_r', colorvar=np.array([])):

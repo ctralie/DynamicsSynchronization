@@ -21,8 +21,7 @@ def im2fft2_padded(p, theta=None, window=True, flip = False, shift=True):
     ppad = np.zeros((2*r_max+pd[0]+2*dy, 2*r_max+pd[1]+2*dx))
     ppad[dy+r_max:pd[0]+dy+r_max, dx+r_max:pd[1]+dx+r_max] = p
     if theta:
-        # Note: Image is flipped, so that also flips the rotation angle
-        ppad = ndimage.rotate(ppad, angle=-theta*180/np.pi, reshape=False)
+        ppad = ndimage.rotate(ppad, angle=theta*180/np.pi, reshape=False)
     if flip:
         ppad = np.fliplr(np.flipud(ppad))
     fppad = sfft.fft2(ppad)
@@ -56,8 +55,8 @@ def crosscorr2d_angle(p1, p2, theta):
     """
     p1pad = im2fft2_padded(p1, window=False, shift=False)
     r1pad = im2fft2_padded(np.ones_like(p1), window=False, shift=False)
-    p2pad = im2fft2_padded(p2, window=False, shift=False, flip=False, theta=-theta)
-    r2pad = im2fft2_padded(np.ones_like(p2), window=False, flip=False, shift=False, theta=-theta)
+    p2pad = im2fft2_padded(p2, window=False, shift=False, flip=False, theta=theta)
+    r2pad = im2fft2_padded(np.ones_like(p2), window=False, flip=False, shift=False, theta=theta)
     pscorr = np.abs(sfft.ifft2(p1pad['fppad']*p2pad['fppad']))
     rscorr = np.abs(sfft.ifft2(r1pad['fppad']*r2pad['fppad']))
     #rscorr = correlate2d(r1pad['ppad'], r2pad['ppad'], 'same')

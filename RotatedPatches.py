@@ -2,10 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.transforms as mtransforms
 from scipy import interpolate
-from scipy import stats
 import scipy.fftpack as sfft
 from scipy import ndimage
+from scipy.signal import fftconvolve
 from Kuramoto import *
+import time
 
 def im2fft2_padded(p, theta=None, window=True, flip = False, shift=True):
     pd = p.shape
@@ -48,24 +49,45 @@ def im2polar(p, r_max = None, nr = None, ntheta = None):
     f = interpolate.RectBivariateSpline(pixy, pixx, p)
     return thetas[1]-thetas[0], np.reshape(f(xs, ys, grid=False), (rs.size, thetas.size))    
 
-def crosscorr2d_angle(p1, p2, theta):
+def crosscorr2d_angle(p1, p2, ptheta):
     """
-    Perform an area-normalized cross-correlation
-    after undoing a rotation of the second patch
+    Perform cross-correlation after undoing a rotation of the second patch
+    Try (+/- theta) + [0, pi]
+    Parameters
+    ----------
+    p1: ndarray(m1, n1)
+        Patch 1
+    p2: ndarray(m2, n2)
+        Patch 2
+    ptheta: float
+        Initial estimated angle by which to rotate p2, in radians
+    Returns
+    -------
+    {'corr': ndarray(M, N)
+        The correlation image,
+     'theta': float
+        }
     """
-    p1pad = im2fft2_padded(p1, window=False, shift=False)
-    r1pad = im2fft2_padded(np.ones_like(p1), window=False, shift=False)
-    p2pad = im2fft2_padded(p2, window=False, shift=False, flip=False, theta=theta)
-    r2pad = im2fft2_padded(np.ones_like(p2), window=False, flip=False, shift=False, theta=theta)
-    pscorr = np.abs(sfft.ifft2(p1pad['fppad']*p2pad['fppad']))
-    rscorr = np.abs(sfft.ifft2(r1pad['fppad']*r2pad['fppad']))
-    #rscorr = correlate2d(r1pad['ppad'], r2pad['ppad'], 'same')
-    rscorr[rscorr < 1] = 1.0
-    corr = pscorr/rscorr
-    return {'corr':pscorr, 'p1pad':p1pad, 'p2pad':p2pad}
+    max_theta = ptheta
+    max_corr_val = 0
+    max_corr_img = np.array([])
+    corr_vals = []
+    for dtheta in [0, np.pi]:
+        theta = ptheta + dtheta
+        p2rot = ndimage.rotate(p2, angle=theta*180/np.pi, reshape=True)
+        corr_img = fftconvolve(p1, np.fliplr(np.flipud(p2rot)))
+        corr_val = np.max(corr_img)
+        corr_vals.append(theta)
+        corr_vals.append(corr_val)
+        if corr_val > max_corr_val:
+            max_corr_val = corr_val
+            max_corr_img = corr_img
+            max_theta = theta
+    return {'corr':max_corr_img, 'theta':max_theta, 'corr_vals':corr_vals}
 
 
 if __name__ == '__main__':
+    np.random.seed(0)
     dim = 64
     fac = 0.5
     ks = KSSimulation(co_rotating=False, scale=(fac*7, fac/2))
@@ -75,7 +97,7 @@ if __name__ == '__main__':
     vmin = -vmax
     
     x1 = np.array([120, 100])
-    x2 = x1 + np.array([10, 10])
+    x2 = x1 + np.array([20, 20])
     
     ks.Xs = np.array([x1[0], x2[0]])
     ks.Ts = np.array([x1[1], x2[1]])
@@ -88,10 +110,12 @@ if __name__ == '__main__':
     thetas = []
     thetas_est = []
     for i, theta in enumerate(np.linspace(0, 2*np.pi, 100)):
-        ks.thetas = np.array([0, theta])
+        ks.thetas = 2*np.pi*np.random.rand(2)
         ks.completeObservations()
         p1 = np.reshape(ks.patches[0, :], (dim, dim))
         p2 = np.reshape(ks.patches[1, :], (dim, dim))
+
+        tic = time.time()
         ppad1 = np.abs(im2fft2_padded(p1)['fppad'])
         ppad2 = np.abs(im2fft2_padded(p2)['fppad'])
         dtheta, polar1 = im2polar(ppad1, r_max, nr, ntheta)
@@ -108,20 +132,23 @@ if __name__ == '__main__':
         # Try theta and theta + pi to see which gives a better
         # normalized translational cross-correlation
         res = crosscorr2d_angle(p1, p2, theta_est)
-        res2 = crosscorr2d_angle(p1, p2, theta_est+np.pi)
-        if np.max(res2['corr']) < np.max(res['corr']):
-            res = res2
-            theta_est = (theta_est+np.pi) % (2*np.pi)
+        theta_est = res['theta']
         corr = res['corr']
+        corr_vals = tuple(res['corr_vals'])
         idxcorr = np.argmax(corr)
         idxcorr = np.unravel_index(idxcorr, corr.shape)
 
-        #"""
+        print("Elapsed Time: %.3g"%(time.time()-tic))
+        thetas.append((ks.thetas[1]-ks.thetas[0]) % (2*np.pi))
+        thetas_est.append(theta_est)
+
+        """
         plt.clf()
         plt.subplot(231)
-        plt.imshow(res['p1pad']['ppad'])
+        plt.imshow(p1, vmin=vmin, vmax=vmax)
+        plt.title("%.3g: %.3g, %.3g: %.3g\n%.3g: %.3g, %.3g: %.3g"%corr_vals)
         plt.subplot(232)
-        plt.imshow(res['p2pad']['ppad'])
+        plt.imshow(p2, vmin=vmin, vmax=vmax)
         plt.subplot(233)
         plt.imshow(corr)
         plt.colorbar()
@@ -134,21 +161,23 @@ if __name__ == '__main__':
         plt.subplot(236)
         plt.plot(x)
         plt.stem([idx], x[idx:idx+1])
-        plt.title("theta=%.3g, theta_est=%.3g"%(theta, theta_est))
+        plt.title("theta=%.3g, theta_est=%.3g"%(thetas[-1], thetas_est[-1]))
         plt.savefig("%i.png"%i)
-        #"""
+        """
 
-        thetas.append(theta)
-        thetas_est.append(theta_est)
+        
     
     thetas = np.array(thetas)
     thetas_est = np.array(thetas_est)
-    slope, intercept, r_value, p_value, std_err = stats.linregress(thetas, thetas_est)
+    diffs = np.abs(thetas-thetas_est)
+    diffs = np.minimum(diffs, np.abs(thetas-thetas_est+2*np.pi))
+    diffs = np.minimum(diffs, np.abs(thetas-thetas_est-2*np.pi))
+    
 
     plt.figure()
     plt.scatter(thetas, thetas_est)
-    plt.legend(["y = %.3g x + %.3g"%(slope, intercept)])
     plt.axis('equal')
     plt.xlabel("Thetas")
     plt.ylabel("Thetas Estimated")
+    #plt.title("Avg Diff: %.3g, Stand Diff: %.3g"%(np.mean(diffs), np.std(diffs)))
     plt.savefig("Thetas_Est.svg", bbox_inches='tight')

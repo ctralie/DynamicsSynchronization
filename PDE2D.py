@@ -483,7 +483,7 @@ class PDE2D(object):
                 plt.title("%.3g degrees"%(self.thetas[i]*180/np.pi))
                 plt.savefig("%i.png"%i, bbox_inches='tight')
 
-    def makeVideo(self, Y, D = np.array([]), skip=20, cmap='magma_r', colorvar=np.array([])):
+    def makeVideo(self, Y, D = np.array([]), skip=20, cmap='viridis', colorvar1=np.array([]), colorvar2 = np.array([])):
         """
         Make a video given a nonlinear dimension reduction, which
         is assumed to be indexed parallel to the patches and in approximate raster order
@@ -496,11 +496,15 @@ class PDE2D(object):
         self.f_pointwise = lambda x: x
         self.completeObservations()
 
-        if colorvar.size == 0:
-            colorvar = self.Xs
+        if colorvar1.size == 0:
+            colorvar1 = self.Xs/np.max(self.Xs)
+        if colorvar2.size == 0:
+            colorvar2 = self.Ts/np.max(self.Ts)
         c = plt.get_cmap(cmap)
-        C = c(np.array(np.round(255.0*colorvar/np.max(colorvar)), dtype=np.int32))
-        C = C[:, 0:3]
+        C1 = c(np.array(np.round(255.0*colorvar1), dtype=np.int32))
+        C1 = C1[:, 0:3]
+        C2 = c(np.array(np.round(255.0*colorvar2), dtype=np.int32))
+        C2 = C2[:, 0:3]        
         res = 6
         ncols = 2
         if D.size > 0:
@@ -513,12 +517,15 @@ class PDE2D(object):
             plt.clf()
             plt.subplot(2, ncols, 1)
             self.drawSolutionImage()
+            # Preserve x and y lims
+            xlims = plt.gca().get_xlim()
+            ylims = plt.gca().get_ylim()
             self.plotPatchBoundary(i)
             plt.xlabel("Space")
             plt.ylabel("Time")
             plt.axis('equal')
-            plt.xlim(0, I.shape[1])
-            plt.ylim(I.shape[0], 0)
+            plt.xlim(xlims)
+            plt.ylim(ylims)
             plt.subplot(2, ncols, 2)
             p = self.get_patch(i)
             plt.imshow(p, interpolation='none', cmap='RdGy', vmin=np.min(self.I), vmax=np.max(self.I))
@@ -526,7 +533,7 @@ class PDE2D(object):
             if Y.shape[1] == 2:
                 plt.subplot(2, ncols, ncols+1)
                 plt.scatter(Y[:, 0], Y[:, 1], 100, c=np.array([[0, 0, 0, 0]]))
-                plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C[0:i+1, :])
+                plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C1[0:i+1, :])
                 plt.scatter(Y[i, 0], Y[i, 1], 40, 'r')
                 plt.axis('equal')
                 ax = plt.gca()
@@ -536,12 +543,12 @@ class PDE2D(object):
             elif Y.shape[1] == 3:
                 ax = plt.gcf().add_subplot(200+ncols*10+ncols+1, projection='3d')
                 ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=np.array([[0, 0, 0, 0]]))
-                ax.scatter(Y[0:i+1, 0], Y[0:i+1, 1], Y[0:i+1, 2], c=C[0:i+1, :])
+                ax.scatter(Y[0:i+1, 0], Y[0:i+1, 1], Y[0:i+1, 2], c=C1[0:i+1, :])
                 ax.scatter(Y[i, 0], Y[i, 1], Y[i, 2], 'r')
             else:
                 plt.subplot(2, ncols, ncols+1)
                 plt.scatter(Y[:, 0], Y[:, 1], 100, c=np.array([[0, 0, 0, 0]]))
-                plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C[0:i+1, :])
+                plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C1[0:i+1, :])
                 plt.scatter(Y[i, 0], Y[i, 1], 40, 'r')
                 plt.axis('equal')
                 ax = plt.gca()
@@ -550,7 +557,7 @@ class PDE2D(object):
                 ax.set_yticks([])
                 plt.subplot(2, ncols, ncols+2)
                 plt.scatter(Y[:, 2], Y[:, 3], 100, c=np.array([[0, 0, 0, 0]]))
-                plt.scatter(Y[0:i+1, 2], Y[0:i+1, 3], 20, c=C[0:i+1, :])
+                plt.scatter(Y[0:i+1, 2], Y[0:i+1, 3], 20, c=C2[0:i+1, :])
                 plt.scatter(Y[i, 2], Y[i, 3], 40, 'r')
                 plt.axis('equal')
                 ax = plt.gca()
@@ -576,7 +583,7 @@ class PDE2D(object):
 
 
 
-def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, delta=2, rotate=False, use_rotinvariant=False, do_mahalanobis=True, rank=2, jacfac=1.0, maxeigs=2, periodic=False, cmap='magma_r', pca_dim = None, precomputed_samples = None, do_plot=True, do_tda = False, do_video = False):
+def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, delta=2, rotate=False, use_rotinvariant=False, do_mahalanobis=True, rank=2, jacfac=1.0, maxeigs=2, periodic=False, cmap='viridis', pca_dim = None, precomputed_samples = None, do_plot=True, do_tda = False, do_video = False):
     f_patch = lambda x: x
     delta_theta = 0.1
     if use_rotinvariant:

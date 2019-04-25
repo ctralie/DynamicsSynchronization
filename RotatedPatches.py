@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.transforms as mtransforms
 from scipy import interpolate
 import scipy.fftpack as sfft
 from scipy import ndimage

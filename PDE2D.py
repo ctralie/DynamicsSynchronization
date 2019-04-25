@@ -404,7 +404,7 @@ class PDE2D(object):
             self.pca = pca
 
     
-    def plotPatchBoundary(self, i, draw_arrows=True, flip_y = True):
+    def plotPatchBoundary(self, i, color = 'C0', sz = 1, draw_arrows=True, flip_y = True):
         """
         Plot a rectangular outline of the ith patch
         along with arrows at its center indicating
@@ -415,6 +415,11 @@ class PDE2D(object):
             Index of patch
         draw_arrows: boolean
             Whether to draw a coordinate system in the patch
+        color: string
+            Color of boundary box
+        sz: int
+            Thickness of boundary
+
         flip_y: boolean
             Whether to flip the y arrow for the coordinate system
         """
@@ -428,7 +433,7 @@ class PDE2D(object):
         xc = self.Xs[i]
         tc = self.Ts[i]
         x = (R.dot(x.T)).T + np.array([[xc, tc]])
-        plt.plot(x[:, 0], x[:, 1], 'C0')
+        plt.plot(x[:, 0], x[:, 1], color, lineWidth=sz)
         ax = plt.gca()
         R[:, 0] *= self.pd[1]/2
         R[:, 1] *= self.pd[0]/2
@@ -452,7 +457,7 @@ class PDE2D(object):
         p = self.patches[idx, :]
         return np.reshape(p, self.pd)
 
-    def plotPatches(self, save_frames = True):
+    def plotPatches(self, n_patches = None, save_frames = True):
         """
         Make a video of the patches
         """
@@ -497,25 +502,29 @@ class PDE2D(object):
         C = c(np.array(np.round(255.0*colorvar/np.max(colorvar)), dtype=np.int32))
         C = C[:, 0:3]
         res = 6
-        fig = plt.figure(figsize=(res*3, res*2))
+        ncols = 2
+        if D.size > 0:
+            ncols = 3
+        fig = plt.figure(figsize=(res*ncols, res*2))
         I, Xs, Ts = self.I, self.Xs, self.Ts
         idx = 0
         N = Y.shape[0]
         for i in range(0, N, skip):
             plt.clf()
-            plt.subplot(231)
-            plt.imshow(I, interpolation='none', aspect='auto', cmap='RdGy')
+            plt.subplot(2, ncols, 1)
+            self.drawSolutionImage()
             self.plotPatchBoundary(i)
             plt.xlabel("Space")
             plt.ylabel("Time")
             plt.axis('equal')
             plt.xlim(0, I.shape[1])
             plt.ylim(I.shape[0], 0)
-            plt.subplot(232)
+            plt.subplot(2, ncols, 2)
             p = self.get_patch(i)
             plt.imshow(p, interpolation='none', cmap='RdGy', vmin=np.min(self.I), vmax=np.max(self.I))
+            plt.axis('off')
             if Y.shape[1] == 2:
-                plt.subplot(234)
+                plt.subplot(2, ncols, ncols+1)
                 plt.scatter(Y[:, 0], Y[:, 1], 100, c=np.array([[0, 0, 0, 0]]))
                 plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C[0:i+1, :])
                 plt.scatter(Y[i, 0], Y[i, 1], 40, 'r')
@@ -525,12 +534,12 @@ class PDE2D(object):
                 ax.set_xticks([])
                 ax.set_yticks([])
             elif Y.shape[1] == 3:
-                ax = plt.gcf().add_subplot(234, projection='3d')
+                ax = plt.gcf().add_subplot(200+ncols*10+ncols+1, projection='3d')
                 ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=np.array([[0, 0, 0, 0]]))
                 ax.scatter(Y[0:i+1, 0], Y[0:i+1, 1], Y[0:i+1, 2], c=C[0:i+1, :])
                 ax.scatter(Y[i, 0], Y[i, 1], Y[i, 2], 'r')
             else:
-                plt.subplot(234)
+                plt.subplot(2, ncols, ncols+1)
                 plt.scatter(Y[:, 0], Y[:, 1], 100, c=np.array([[0, 0, 0, 0]]))
                 plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C[0:i+1, :])
                 plt.scatter(Y[i, 0], Y[i, 1], 40, 'r')
@@ -539,7 +548,7 @@ class PDE2D(object):
                 ax.set_facecolor((0.15, 0.15, 0.15))
                 ax.set_xticks([])
                 ax.set_yticks([])
-                plt.subplot(235)
+                plt.subplot(2, ncols, ncols+2)
                 plt.scatter(Y[:, 2], Y[:, 3], 100, c=np.array([[0, 0, 0, 0]]))
                 plt.scatter(Y[0:i+1, 2], Y[0:i+1, 3], 20, c=C[0:i+1, :])
                 plt.scatter(Y[i, 2], Y[i, 3], 40, 'r')
@@ -558,7 +567,7 @@ class PDE2D(object):
                 plt.xlim([0, D.shape[1]])
                 plt.ylim([D.shape[1], 0])
 
-            plt.savefig("%i.png"%idx)
+            plt.savefig("%i.png"%idx, bbox_inches='tight')
             idx += 1
         # Set patches back to what they were
         self.patches = patches_before
@@ -636,12 +645,14 @@ def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, d
         plt.title("Diffusion Map SSM")
         plt.show()
 
+    ret = {'Y':Y, 'pde':pde}
     if do_tda:
         from ripser import ripser
         from persim import plot_diagrams as plot_dgms
         perm, lambdas = getGreedyPerm(Y, 600)
         plt.figure()
         dgms = ripser(Y[perm, 0:4], maxdim=2)["dgms"]
+        ret['dgms'] = dgms
         plot_dgms(dgms, show=False)
         plt.show()
 
@@ -649,4 +660,4 @@ def testMahalanobis_PDE2D(pde, pd = (25, 25), nsamples=(30, 30), dMaxSqr = 10, d
     if do_video:
         pde.makeVideo(Y, largeimg(getSSM(Y)), skip=1, cmap=cmap)
     
-    return Y
+    return ret

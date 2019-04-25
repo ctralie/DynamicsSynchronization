@@ -4,7 +4,7 @@ import scipy.io as sio
 from scipy import interpolate
 from scipy.ndimage.filters import gaussian_filter1d as gf1d
 from sklearn.decomposition import PCA
-from scipy.fftpack import fft2 as fft2
+from scipy.fftpack import fft2 as fft2, fftshift
 import time
 
 def get_spinimage(im, n_angles=50, do_plot=False):
@@ -193,62 +193,88 @@ def get_scattering(patches, pd, J=4, L=8, rotinvariant=True):
     #res = np.zeros((patches.shape[0], 2+L))
     return np.reshape(coeffs, (patches.shape[0], coeffs.shape[2]*coeffs.shape[3]*coeffs.shape[4]))
 
-def testFourierRotation(im, n_angles=30, res = 32):
-    M, N = im.shape[0], im.shape[1]
-    r = float(min(M, N))/2.0
-    pixx = np.arange(N) - float(N)/2
-    pixy = np.arange(M) - float(M)/2
-    f = interpolate.RectBivariateSpline(pixy, pixx, im)
-    D = int(np.ceil(np.sqrt(M**2+N**2)))
+def makePaperFigure(dim=64):
+    """
+    Make a video showing how FTM2D stays the same for rotated
+    patches
+    """
+    from Kuramoto import KSSimulation
+    dim = 64
+    fac = 0.5
+    ks = KSSimulation(co_rotating=False, scale=(fac*7, fac/2))
+    ks.I = ks.I[0:int(195*fac), :]
+    #ks.I = np.random.randn(ks.I.shape[0], ks.I.shape[1])
+    vmax = np.max(np.abs(ks.I))
+    vmin = -vmax
+    
+    x1 = np.array([120, 100])
+    ks.Xs = np.array([x1[0]])
+    ks.Ts = np.array([x1[1]])
+    ks.pd = (dim, dim)
 
-    pix = np.arange(D) - float(D)/2
+    pix = np.arange(dim) - float(dim)/2
     x, y = np.meshgrid(pix, pix)
     x = x.flatten()
     y = y.flatten()
-    pixd = np.arange(D)-float(D)/2
     
-
-    thetas = np.linspace(0, 2*np.pi, res+1)[0:res]
-    rs = np.linspace(0, r, res)
+    thetasc = np.linspace(0, 2*np.pi, dim+1)
+    thetas = thetasc[0:-1]
+    rs = np.linspace(0, dim/2, dim+1)
     xs = rs[:, None]*np.cos(thetas[None, :])
     ys = rs[:, None]*np.sin(thetas[None, :])
     xs, ys = xs.flatten(), ys.flatten()
 
-    thetas = np.linspace(0, 2*np.pi, 100)
-    plt.figure(figsize=(18, 6))
-    print("r = %i"%r)
-    for i, t in enumerate(np.linspace(0, 2*np.pi, n_angles+1)[0:n_angles]):
-        c, s = np.cos(t), np.sin(t)
-        xt = c*x + s*y
-        yt = -s*x + c*y
-        It = f(yt, xt, grid=False)
-        It[np.abs(yt) > float(M)/2] = 0
-        It[np.abs(xt) > float(N)/2] = 0
-        It = np.reshape(It, (D, D))
-        ft = interpolate.RectBivariateSpline(pixd, pixd, It)
-        polar = ft(xs, ys, grid=False)
-        polar = np.reshape(polar, (res, res))
-        polar_ftm2d = np.abs(fft2(polar))
-
+    fac = 1.2
+    plt.figure(figsize=(fac*9, fac*7))
+    r = float(dim/2)
+    thetasiter = np.linspace(0, 2*np.pi, 100)
+    #thetasiter = [np.pi/3]
+    frange = None
+    for idx, theta in enumerate(thetasiter):
         plt.clf()
-        plt.subplot(131)
-        plt.imshow(It)
-        plt.plot(r*np.cos(thetas)+float(D)/2, r*np.sin(thetas)+float(D)/2)
-        plt.title("Original")
-        plt.subplot(132)
-        plt.imshow(polar)
-        plt.gca().invert_yaxis()
+        ks.thetas = np.array([theta])
+        ks.completeObservations()
+
+        p = np.reshape(ks.patches[0, :], (dim, dim))
+        ft = interpolate.RectBivariateSpline(pix, pix, p)
+        polar = ft(xs, ys, grid=False)
+        polar = np.reshape(polar, (rs.size, thetas.size))
+        polar_ft2d = fftshift(fft2(polar))
+
+        plt.subplot(2, 3, 1)
+        plt.imshow(p, cmap='RdGy', vmin=vmin, vmax=vmax)
+        plt.plot(r*np.cos(thetasc)+r, r*np.sin(thetasc)+r)
+        plt.title("Rotated by $%.3g$"%theta)
+        plt.subplot(2, 3, 2)
+        plt.imshow(polar, cmap='RdGy', vmin=vmin, vmax=vmax)
+        plt.xticks([0, dim/2, dim], ['0', '$\\pi$', '$2 \\pi$'])
+        plt.yticks([0, rs.size/2, rs.size-1], ["%i"%ri for ri in [rs[0], rs[int(rs.size/2)], rs[-1]]])
+        ax = plt.gca()
+        ax.invert_yaxis()
         plt.xlabel("$\\theta$")
         plt.ylabel("r")
         plt.title("Polar")
-        plt.subplot(133)
-        plt.imshow(polar_ftm2d)
-        plt.title("Polar FTM2D")
-        plt.savefig("%i.png"%i, bbox_inches='tight')
+        
+        if not frange:
+            frange = np.max(np.abs(np.real(polar_ft2d)))
+            frange = max(frange, np.max(np.abs(np.imag(polar_ft2d))))
+
+        plt.subplot(234)
+        plt.imshow(np.real(polar_ft2d), vmin=-frange, vmax=frange, cmap='magma_r', interpolation='nearest')
+        plt.axis('off')
+        plt.title("Real Polar FFT2D")
+        plt.subplot(235)
+        plt.imshow(np.imag(polar_ft2d), vmin=-frange, vmax=frange, cmap='magma_r', interpolation='nearest')
+        plt.axis('off')
+        plt.title("Imaginary Polar FFT2D")
+        plt.subplot(236)
+        plt.imshow(np.abs(polar_ft2d), cmap='magma_r', interpolation='nearest')
+        plt.axis('off')
+        plt.title("Mag Polar FFT2D")
+            
+        #plt.tight_layout()
+        plt.savefig("%i.png"%idx, bbox_inches='tight')
 
 
 if __name__ == '__main__':
-    res = sio.loadmat("KS.mat")
-    I = res["data"]
-    im = I[0:64, 0:64]
-    testFourierRotation(im)
+    makePaperFigure()

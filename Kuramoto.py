@@ -43,12 +43,24 @@ class KSSimulation(PDE2D):
             INew[i, :] = spl((np.arange(N) + i*ratio) % N)
         self.I = INew
 
-    def drawSolutionImage(self, time_extent = False):
+    def drawSolutionImage(self, time_extent = True, inc = 0.02):
         if time_extent:
+            from matplotlib.ticker import FormatStrFormatter
             m = np.max(np.abs(self.I))
-            plt.imshow(self.I, interpolation='nearest', aspect='auto', \
-                        cmap='RdGy', extent=(0, self.xs[-1], \
-                        self.ts[-1], self.ts[0]), vmin=-m, vmax=m)
+            I = np.array(self.I)
+            I = np.concatenate((I, I, I), 1)
+            plt.imshow(I, extent = (-self.I.shape[1], 2*self.I.shape[1], self.I.shape[0], 0), cmap='RdGy', vmin=-m, vmax=m)
+            d = self.I.shape[1]/2
+            plt.xticks([-2*d, -d, 0, d, 2*d, 3*d, 4*d], ['$-2\\pi$', '$-\\pi$', '0', '$\\pi$', '$2 \\pi$', '$3 \\pi$', '$4 \\pi$'])
+            plt.xlim([-0.5*d, d*2.7])
+            ts = self.ts
+            ms = inc/(ts[1]-ts[0])
+            n = np.ceil(ts.size/ms)
+            idx = np.arange(n)*ms
+            ts = ['%.3g'%t for t in ts[np.array(idx, dtype=int)]]
+            plt.yticks(idx, ts)
+            plt.xlabel("Space (Radians)")
+            plt.ylabel("Time (Seconds)")
         else:
             plt.imshow(self.I, interpolation='nearest', aspect='auto', cmap='RdGy')
     
@@ -153,16 +165,28 @@ def testKS_Alignment():
     # come up with correspondences
     fac = 0.5
     ks = KSSimulation(co_rotating=False, scale=(fac*7, fac/2))
-    ks.I = ks.I[0:195, :]
+    ks.crop(0, 170, 0, ks.I.shape[1])
 
     ## Step 2: Run Mahalanobis on (rotated) patches
-    noisefac = 0.001
+    """
+    noisefac = 0.01
     ks.I += noisefac*np.max(np.abs(ks.I))*np.random.randn(ks.I.shape[0], ks.I.shape[1])
-    Yks = testMahalanobis_PDE2D(ks, pd=(64, 64), nsamples=2000, \
-                    dMaxSqr=1000, delta=2, rank=2, maxeigs=20, jacfac=1,\
+    Yks = testMahalanobis_PDE2D(ks, pd=(32, 32), nsamples=5000, \
+                    dMaxSqr=100, delta=2, rank=2, maxeigs=85, jacfac=0.75,\
                     periodic=True, rotate=True, use_rotinvariant=True, \
                     do_mahalanobis=True, \
-                    precomputed_samples=None, pca_dim=40, do_plot=True, do_tda=False, do_video=False)
+                    precomputed_samples=None, pca_dim=120, do_plot=True, do_tda=True, do_video=False)
+    """
+
+    #"""
+    noisefac = 0.01
+    ks.I += noisefac*np.max(np.abs(ks.I))*np.random.randn(ks.I.shape[0], ks.I.shape[1])
+    Yks = testMahalanobis_PDE2D(ks, pd=(45, 45), nsamples=4000, \
+                    dMaxSqr=1000, delta=2, rank=2, maxeigs=85, jacfac=0.75,\
+                    periodic=True, rotate=True, use_rotinvariant=True, \
+                    do_mahalanobis=True, \
+                    precomputed_samples=None, pca_dim=120, do_plot=True, do_tda=True, do_video=False)
+    #"""
 
     ## Step 3: Run alignment to ideal torus
     ft = FlatTorusIdeal(60, 60, Yks.shape[1])
@@ -170,14 +194,19 @@ def testKS_Alignment():
     doICP_PDE2D(ks, Yks[:, 0:4], ft, Yft[:, 0:4], initial_guesses=10, do_plot=True)
 
 def plotKS():
-    ks = KSSimulation(co_rotating=False)
-    ks.makeObservations((64, 20), 100, rotate=True)
-    ks.plotPatches()
+    fac = 0.5
+    ks = KSSimulation(co_rotating=False, scale=(fac*7, fac/2))
+    ks.crop(0, 170, 0, ks.I.shape[1])
+    ks.drawSolutionImage()
+    plt.show()
+    
+    #ks.makeObservations((64, 20), 100, rotate=True)
+    #ks.plotPatches()
     #ks.makeTimeSeriesVideo()
 
 if __name__ == '__main__':
     #testKS_VerticalOnly()
     #testKS_Variations(ks)
     #testKS_Rotations(ks)
-    testKS_Alignment()
-    #plotKS()
+    #testKS_Alignment()
+    plotKS()

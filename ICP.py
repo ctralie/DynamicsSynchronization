@@ -290,7 +290,7 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
     idxMin = []
     for i in range(initial_guesses):
         S = np.eye(dim)
-        if rank < dim:
+        if rank < dim and corresp.size == 0:
             # Come up with a random rotation for the subspace
             # that's not determined by the correspondences
             diff = dim-rank
@@ -323,38 +323,49 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
     patch_centers = f_interp(pde1.Ts.flatten(), pde1.Xs.flatten(), grid=False)
 
     if do_plot:
-        plt.figure(figsize=(15, 15))
+        plt.figure(figsize=(12, 6))
         for i, idx in enumerate(idxMin):
             Xs = pde2.Xs[idx]
             Ts = pde2.Ts[idx]
             plt.clf()
             idx = np.array(idx)
-            plt.subplot(331)
+            """
+            plt.subplot(231)
             plt.scatter(pde1.Xs, pde1.Ts, c=Xs, cmap=cmap)
             plt.title("Patch Locs Colored By Xs")
-            plt.subplot(332)
+            plt.subplot(232)
             plt.scatter(pde1.Xs, pde1.Ts, c=Ts, cmap=cmap)
             plt.title("Patch Locs Colored by Ts")
-            plt.subplot(333)
+            plt.subplot(233)
+            """
+            plt.subplot(122)
             plt.plot(rmses_iter)
             plt.scatter([i], [rmses_iter[i]])
             plt.xlabel("Iteration number")
             plt.title("ICP Iteration %i, RMSE=%.3g"%(i, rmses_iter[i]))
             plt.ylabel("RMSE")
-            plt.subplot(334)
+            """
+            plt.subplot(234)
             plt.scatter(Xs, Ts, c=pde1.Xs, cmap=cmap)
             plt.xlabel("Xs Flat Torus")
             plt.ylabel("Ts Flat Torus")
             plt.title("Xs, Ts, Colored By Loc X")
-            plt.subplot(335)
+            plt.subplot(235)
             plt.scatter(Xs, Ts, c=pde1.Ts, cmap=cmap)
             plt.xlabel("Xs Flat Torus")
             plt.ylabel("Ts Flat Torus")
             plt.title("Xs, Ts, Colored By Loc T")
             D2 = getSSM(Y2[idx, :])
-            plt.subplot(336)
+            plt.subplot(236)
+            """
+            plt.subplot(121)
             plt.scatter(Xs, Ts, c=patch_centers, cmap='RdGy')
+            plt.xticks([0, 0.5, 1], ["0", "$\\pi$", "$2 \\pi$"])
+            plt.yticks([0, 0.5, 1], ["0", "$\\pi$", "$2 \\pi$"])
+            plt.xlabel("$\\theta$")
+            plt.ylabel("$\\phi$")
             plt.title("Patch Centers")
+            """
             plt.subplot(337)
             plt.imshow(D1, cmap=cmap)
             plt.title("D1 Mahalanobis")
@@ -368,6 +379,7 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
             plt.colorbar()
             plt.title("Difference (RMSE=%.3g)"%rmses_iter[i])
             plt.tight_layout()
+            """
             plt.savefig("ICP%i.png"%i, bbox_inches='tight')
     
     return {'idxMin':idxMin, 'rmses_iter':rmses_iter}

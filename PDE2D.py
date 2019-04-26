@@ -15,6 +15,8 @@ from DiffusionMaps import *
 from Mahalanobis import *
 from LocalPCA import *
 from PatchDescriptors import *
+from RotatedPatches import estimate_rotangle
+from ConnectionLaplacian import getConnectionLaplacian
 import subprocess
 
 imresize = lambda x, M, N: skimage.transform.resize(x, (M, N), anti_aliasing=True, mode='reflect')
@@ -403,7 +405,80 @@ class PDE2D(object):
             self.patches = pca.transform(self.patches)
             self.pca = pca
 
+    def sample_raw_patches(self):
+        """
+        Regardless of the patch feature functions or
+        dimension reduction, sample the patches from
+        scratch with raw pixels.  Save the previous
+        patches and functions as a side effect, so that
+        they can be recovered later
+        """
+        self.patches_before = np.array(self.patches)
+        self.f_patch_before = self.f_patch
+        self.f_pointwise_before = self.f_pointwise
+        self.f_patch = lambda x: x
+        self.f_pointwise = lambda x: x
+        self.completeObservations()
     
+    def recover_original_patches(self):
+        """
+        Go back to the originally sampled patches
+        after having called sample_raw_patches()
+        """
+        self.patches = self.patches_before
+        self.f_patch = self.f_patch_before
+        self.f_pointwise = self.f_pointwise_before
+
+    def estimate_rotations(self, X, K):
+        """
+        Given estimated diffusion map coordinates, estimate
+        rotations by doing pairwise estimates of near neighbors
+        and diffusion error out globally using the connection Laplacian
+        Parameters
+        ----------
+        X: ndarray(N, d)
+            Estimated diffusion map coordinates
+        K: int
+            Number of near neighbors to take for each patch
+        """
+        self.sample_raw_patches()
+        D = getSSM(X)
+        N = D.shape[0]
+        np.fill_diagonal(D, np.inf)
+        J = np.argpartition(D, K, 1)[:, 0:K] # Nearest neighbor indices
+        ws = []
+        Os = []
+        pairs = set([])
+        for i in range(N):
+            if i%100 == 0:
+                print("Estimating angles %i of %i"%(i, N))
+            pi = self.get_patch(i)
+            fft1 = np.array([])
+            for j in J[i, :]:
+                if (i, j) in pairs or (j, i) in pairs:
+                    # This correlation has already been computed
+                    continue
+                pairs.add((i, j))
+                pj = self.get_patch(j)
+                res = estimate_rotangle(pi, pj, fft1=np.array([]))
+                fft1 = res['fft1'] # Cache the fft for the first patch
+                theta = res['theta_est'] # CCW theta taking pi to pj
+                # Oij moves vectors from j to i (so it is CCW by theta)
+                c = np.cos(theta)
+                s = np.sin(theta)
+                Oij = np.array([[c, -s], [s, c]])
+                Os.append(Oij)
+                ws.append([i, j, 1.0]) #TODO: Use weights from correlation
+        ws = np.array(ws)
+        print("Doing connection Laplacian...")
+        w, v = getConnectionLaplacian(ws, Os, N, 2)
+        print(w)
+        v = np.reshape(v[:, 1], (N, 2))
+        thetas_est = np.arctan2(v[:, 1], v[:, 2])
+        self.recover_original_patches()
+        return thetas_est
+
+
     def plotPatchBoundary(self, i, color = 'C0', sz = 1, draw_arrows=True, flip_y = True):
         """
         Plot a rectangular outline of the ith patch
@@ -489,13 +564,7 @@ class PDE2D(object):
         is assumed to be indexed parallel to the patches and in approximate raster order
         """
         # Resample original patches for display
-        patches_before = np.array(self.patches)
-        f_patch_before = self.f_patch
-        f_pointwise_before = self.f_pointwise
-        self.f_patch = lambda x: x
-        self.f_pointwise = lambda x: x
-        self.completeObservations()
-
+        self.sample_raw_patches()
         if colorvar1.size == 0:
             colorvar1 = self.Xs/np.max(self.Xs)
         if colorvar2.size == 0:
@@ -577,9 +646,7 @@ class PDE2D(object):
             plt.savefig("%i.png"%idx, bbox_inches='tight')
             idx += 1
         # Set patches back to what they were
-        self.patches = patches_before
-        self.f_patch = f_patch_before
-        self.f_pointwise = f_pointwise_before
+        self.recover_original_patches()
 
 
 

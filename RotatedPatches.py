@@ -97,7 +97,11 @@ def crosscorr2d_angle(p1, p2, ptheta):
     -------
     {'corr': ndarray(M, N)
         The correlation image,
-     'theta': float
+    'theta': float
+        The estimated CCW angle taking patch 1 to patch 2
+    'corr_vals': list(4)
+        [ptheta, corr2, ptheta+pi, corr2]
+        The correlation values at the two angles attempted
         }
     """
     max_theta = ptheta
@@ -163,8 +167,7 @@ def estimate_rotangle(p1, p2, r_max=20, nr=40, ntheta=None, fft1=np.array([]), f
         Scores at different theta shifts)
      }
     """
-    
-    if not fft1:
+    if fft1.size == 0:
         dtheta, fft1, polar1 = get1dfftpolar(p1, r_max, nr, ntheta)
     else:
         polar1 = np.array([])

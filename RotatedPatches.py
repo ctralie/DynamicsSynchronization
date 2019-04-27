@@ -108,6 +108,8 @@ def crosscorr2d_angle(p1, p2, ptheta):
     max_corr_val = 0
     max_corr_img = np.array([])
     corr_vals = []
+    # Try theta and theta + pi to see which gives a better
+    # normalized translational cross-correlation
     for dtheta in [0, np.pi]:
         theta = ptheta + dtheta
         p2rot = ndimage.rotate(p2, angle=theta*180/np.pi, reshape=True)
@@ -118,7 +120,7 @@ def crosscorr2d_angle(p1, p2, ptheta):
         if corr_val > max_corr_val:
             max_corr_val = corr_val
             max_corr_img = corr_img
-            max_theta = theta
+            max_theta = theta % (2*np.pi)
     return {'corr':max_corr_img, 'theta':max_theta, 'corr_vals':corr_vals}
 
 
@@ -133,7 +135,7 @@ def get1dfftpolar(p, r_max, nr, ntheta, flip=False):
     fft = np.fft.fft(polar, axis=1)
     return dtheta, fft, polar
 
-def estimate_rotangle(p1, p2, r_max=20, nr=40, ntheta=None, fft1=np.array([]), fft2=np.array([])):
+def estimate_rotangle(p1, p2, r_max=20, nr=40, ntheta=None, fft1=np.array([]), fft2=np.array([]), do_plot=False):
     """
     Parameters
     ----------
@@ -152,12 +154,13 @@ def estimate_rotangle(p1, p2, r_max=20, nr=40, ntheta=None, fft1=np.array([]), f
         Precomputed fft1, if it exists
     fft2: ndarray(N)
         Precomputed fft2, if it exists
-    
+    do_plot: boolean
+        Whether to plot the best rotated result
     Returns
     -------
     A bunch of stuff in a dictionary.  The most important stuff is
     {'theta_est': float
-        Estimated optimal CCW rotation to take p1 to p2, 
+        Estimated optimal CCW rotation to take p2 to p1, 
      'corr': ndarray(M, M)
         Array of estimated translational correlations to take p1
         to p2 after the optimal rotation (max location is not usually
@@ -179,12 +182,21 @@ def estimate_rotangle(p1, p2, r_max=20, nr=40, ntheta=None, fft1=np.array([]), f
     idx = np.argmax(x)
     theta_est = idx*dtheta % (2*np.pi)
 
-    # Try theta and theta + pi to see which gives a better
-    # normalized translational cross-correlation
     res = crosscorr2d_angle(p1, p2, theta_est)
     theta_est = res['theta']
     corr = res['corr']
     corr_vals = tuple(res['corr_vals'])
+
+    if do_plot:
+        vmax = max(np.max(np.abs(p1)), np.max(np.abs(p2)))
+        vmin = -vmax
+        plt.subplot(131)
+        plt.imshow(p1, vmin=vmin, vmax=vmax, cmap='RdGy')
+        plt.subplot(132)
+        plt.imshow(p2, vmin=vmin, vmax=vmax, cmap='RdGy')
+        plt.subplot(133)
+        plt.imshow(ndimage.rotate(p2, angle=theta_est*180/np.pi, reshape=True), vmin=vmin, vmax=vmax, cmap='RdGy')
+        plt.title("theta_est = %.3g"%(theta_est*180/np.pi))
 
     return {'fft1':fft1, 'polar1':polar1, 'fft2':fft2, 'polar2':polar2, 'theta_est':theta_est, 'corr':corr, 'corr_vals':corr_vals, 'x':x, 'dtheta':dtheta}
 
@@ -245,6 +257,7 @@ def testRotationRecovery(save_frames = True):
             plt.stem([idx], x[idx:idx+1])
             plt.title("theta=%.3g, theta_est=%.3g"%(thetas[-1], thetas_est[-1]))
             plt.savefig("%i.png"%i)
+            
 
 
     thetas = np.array(thetas)

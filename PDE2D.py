@@ -429,7 +429,7 @@ class PDE2D(object):
         self.f_patch = self.f_patch_before
         self.f_pointwise = self.f_pointwise_before
 
-    def estimate_rotations(self, X, K):
+    def estimate_rotations(self, X, K, corrweight=False):
         """
         Given estimated diffusion map coordinates, estimate
         rotations by doing pairwise estimates of near neighbors
@@ -440,43 +440,66 @@ class PDE2D(object):
             Estimated diffusion map coordinates
         K: int
             Number of near neighbors to take for each patch
+        
+        Returns
+        -------
+        {'thetas_est': ndarray(N)
+            Estimated global rotations for each patch,
+         'thetasij': ndarray(M, 3)
+            Relative estimations between some subset of all pairs}
         """
         self.sample_raw_patches()
         D = getSSM(X)
         N = D.shape[0]
         np.fill_diagonal(D, np.inf)
         J = np.argpartition(D, K, 1)[:, 0:K] # Nearest neighbor indices
+        I = np.arange(J.shape[0])[:, None]*np.ones((1, J.shape[1]))
+        J = J.flatten()
+        I = np.array(I.flatten(), dtype=int)
+        B = np.zeros_like(D)
+        B[I, J] = 1
+        B[J, I] = 1
         ws = []
         Os = []
-        pairs = set([])
+        thetasij = []
         for i in range(N):
             if i%100 == 0:
                 print("Estimating angles %i of %i"%(i, N))
             pi = self.get_patch(i)
             fft1 = np.array([])
-            for j in J[i, :]:
-                if (i, j) in pairs or (j, i) in pairs:
-                    # This correlation has already been computed
+            for j in range(i+1, N):
+                if B[i, j] == 0:
                     continue
-                pairs.add((i, j))
                 pj = self.get_patch(j)
-                res = estimate_rotangle(pi, pj, fft1=np.array([]))
+                res = estimate_rotangle(pi, pj, fft1=fft1)
                 fft1 = res['fft1'] # Cache the fft for the first patch
-                theta = res['theta_est'] # CCW theta taking pi to pj
-                # Oij moves vectors from j to i (so it is CCW by theta)
+                theta = res['theta_est'] # CCW theta taking pj to pi
+                # Oij moves vectors from j to i (so it is opposite direction)
+                theta *= -1
                 c = np.cos(theta)
                 s = np.sin(theta)
                 Oij = np.array([[c, -s], [s, c]])
                 Os.append(Oij)
-                ws.append([i, j, 1.0]) #TODO: Use weights from correlation
+                weight = 1.0 
+                if corrweight:
+                    weight = np.max(res['corr'])
+                ws.append([i, j, weight])
+                Os.append(Oij.T)
+                ws.append([j, i, weight])
+                thetasij.append([i, j, theta])
         ws = np.array(ws)
+        if corrweight:
+            # Normalize weights to range [0, 1]
+            ws[:, 2] -= np.min(ws[:, 2])
+            ws[:, 2] /= np.max(ws[:, 2])
+        thetasij = np.array(thetasij)
         print("Doing connection Laplacian...")
         w, v = getConnectionLaplacian(ws, Os, N, 2)
         print(w)
-        v = np.reshape(v[:, 1], (N, 2))
-        thetas_est = np.arctan2(v[:, 1], v[:, 2])
+        v = np.reshape(v[:, 0], (N, 2))
+        thetas_est = np.arctan2(v[:, 1], v[:, 0])
         self.recover_original_patches()
-        return thetas_est
+        return {'thetas_est':thetas_est, 'thetasij':thetasij, 'ws':ws}
 
 
     def plotPatchBoundary(self, i, color = 'C0', sz = 1, draw_arrows=True, flip_y = True):

@@ -242,6 +242,34 @@ def plotKS():
     ks = KSSimulation(co_rotating=False, scale=(fac*7, fac/2))
     ks.crop(0, 170, 0, ks.I.shape[1])
     ks.drawSolutionImage()
+    
+    N = 5000
+    ks.Xs = np.random.rand(N)*ks.I.shape[1]
+    ks.Ts = np.random.rand(N)*ks.I.shape[0]
+    ks.thetas = 2*np.pi*np.random.rand(N)
+    thetasest = ks.thetas + np.random.randn(N)
+
+    X = np.array([ks.Xs, ks.Ts]).T
+    D = getSSM(X)
+    N = D.shape[0]
+    np.fill_diagonal(D, np.inf)
+    K = 5
+    J = np.argpartition(D, K, 1)[:, 0:K] # Nearest neighbor indices
+    I = np.arange(J.shape[0])[:, None]*np.ones((1, J.shape[1]))
+    J = J.flatten()
+    I = np.array(I.flatten(), dtype=int)
+    B = np.zeros_like(D)
+    B[I, J] = 1
+    B[J, I] = 1
+    thetasij = []
+    for i in range(B.shape[0]):
+        for j in range(B.shape[1]):
+            if B[i, j]:
+                thetasij.append([i, j, thetasest[j]-thetasest[i]])
+    thetasij = np.array(thetasij)
+
+    #ks.plotEstimatedRotations(ks.thetas, 100)
+    ks.plotRelativeRotationErrors(thetasij)
     plt.show()
     
     #ks.makeObservations((64, 20), 100, rotate=True)

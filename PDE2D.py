@@ -287,9 +287,7 @@ class PDE2D(object):
             self.thetas = np.zeros_like(self.Xs)
         
         self.completeObservations()
-
-
-
+    
     def get_mahalanobis_ellipsoid(self, idx, delta, n_points):
         # function(ndarray(d) x0, int idx, float delta, int n_points) -> ndarray(n_points, d)
         """
@@ -489,9 +487,10 @@ class PDE2D(object):
                 thetasij.append([i, j, theta])
         ws = np.array(ws)
         if corrweight:
-            # Normalize weights to range [0, 1]
+            # Normalize weights to the range [0.5, 1]
             ws[:, 2] -= np.min(ws[:, 2])
             ws[:, 2] /= np.max(ws[:, 2])
+            ws[:, 2] = ws[:, 2]*0.5 + 0.5
         thetasij = np.array(thetasij)
         print("Doing connection Laplacian...")
         w, v = getConnectionLaplacian(ws, Os, N, 2)
@@ -500,6 +499,72 @@ class PDE2D(object):
         thetas_est = np.arctan2(v[:, 1], v[:, 0])
         self.recover_original_patches()
         return {'thetas_est':thetas_est, 'thetasij':thetasij, 'ws':ws}
+
+    def plotEstimatedRotations(self, thetas, ntoplot=None):
+        """
+        Plot a vector field showing the difference between
+        the true angle and estimated angle
+        Parameters
+        ----------
+        thetas: ndarray(N)
+            Estimated thetas (same number as self.thetas)
+        ntoplot: int
+            An int <= N of numbers of arrows to plot, sampled
+            from a greedy permutation based on centers
+        """
+        N = self.thetas.size
+        if not ntoplot:
+            idxs = np.arange(N)
+        else:
+            x = np.array([self.Xs, self.Ts]).T
+            idxs, _ = getGreedyPerm(x, N=ntoplot)
+        ax = plt.gca()
+        for idx in idxs:
+            dtheta = self.thetas[idx] - thetas[idx]
+            vidx = 4*np.array([np.cos(dtheta), np.sin(dtheta)])
+            ax.arrow(self.Xs[idx], self.Ts[idx], vidx[0], vidx[1], head_width=2, head_length=2)
+    
+    def plotRelativeRotationErrors(self, thetasij):
+        """
+        Make a scatterplot of the average relative angular error
+        at each pixel, with opacity proportional to the error
+        Parameters
+        ----------
+        thetasij: ndarray(M, 3)
+            Relative estimations between some subset of all pairs}
+        """
+        N = self.thetas.size
+        errs = np.zeros(N)
+        counts = np.zeros(N)
+        I = np.array(thetasij[:, 0], dtype=int)
+        J = np.array(thetasij[:, 1], dtype=int)
+        thetaijest = np.abs(thetasij[:, 2])
+        thetaijest = np.minimum(thetaijest, 2*np.pi-thetaijest)
+        thetaijgt = np.abs(self.thetas[I] - self.thetas[J])
+        thetaijgt = np.minimum(thetaijgt, 2*np.pi-thetaijgt)
+
+        for i in range(thetasij.shape[0]):
+            diff = np.abs(thetaijest[i]-thetaijgt[i])
+            errs[I[i]] += diff
+            errs[J[i]] += diff
+            counts[I[i]] += 1
+            counts[J[i]] += 1
+        errs /= counts
+        q5 = np.quantile(errs, 0.05)
+        q100 = np.max(errs)
+        qs = q5 + (q100-q5)*(np.linspace(0, 1, 10))
+        plt.scatter(self.Xs*0, self.Ts*0, 50, c=errs/q100)
+        cbar = plt.colorbar(ticks=[q/q100 for q in qs])
+        cbar.ax.set_yticklabels(["%.2g"%(180*q/np.pi) for q in qs])
+        
+        cmap = plt.get_cmap('viridis')
+        colors = cmap(errs/q100)
+        alpha = np.log(errs/q5)
+        alpha[alpha < 0] = 0
+        alpha /= np.max(alpha)
+        colors[..., -1] = alpha      
+        plt.scatter(self.Xs, self.Ts, 60, edgecolors='none', c=colors, marker='.')
+
 
 
     def plotPatchBoundary(self, i, color = 'C0', sz = 1, draw_arrows=True, flip_y = True):

@@ -323,9 +323,9 @@ class PDE2D(object):
         # in a disc around the original patch
         xc = x0 + delta*np.random.randn(n_points)
         tc = t0 + delta*np.random.randn(n_points)
-        # Randomly rotate each patch
-        thetasorient = np.zeros(n_points)
+        thetasorient = self.thetas[idx]*np.ones(n_points)
         if self.rotate_patches:
+            # Randomly rotate each patch if using rotation invariant
             thetasorient = 2*np.pi*np.random.rand(n_points)
         cs = np.cos(-thetasorient)
         ss = np.sin(-thetasorient)

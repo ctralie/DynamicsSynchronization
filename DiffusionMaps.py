@@ -19,7 +19,7 @@ def getSSM(X):
     D = np.sqrt(D)
     return D
 
-def getDiffusionMap(X, eps, distance_matrix=False, neigs=4, thresh=1e-2, mask=np.array([]), flip=True):
+def getDiffusionMap(X, eps, distance_matrix=False, neigs=4, thresh=1e-10, mask=np.array([]), flip=True):
     """
     Perform diffusion maps with a unit timestep, automatically
     normalizing for nonuniform sampling

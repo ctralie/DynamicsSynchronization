@@ -70,7 +70,7 @@ def getCorrespondences(X, Y, Cx, Cy, Rx):
     idx = np.argmin(D, 1) #Find index of closest point in Y to point in X
     return idx
 
-def getProcrustesAlignment(X, Y, idx):
+def getProcrustesAlignment(X, Y, idx, weights=np.array([])):
     """
     Given correspondences between two point clouds, to center
     them on their centroids and compute the Procrustes alignment to
@@ -83,6 +83,8 @@ def getProcrustesAlignment(X, Y, idx):
         d x N matrix of points in Y (the target point cloud)
     idx: ndarray(N)
         An array of size M which stores the corresponding indices
+    weights: ndarray(M)
+        Weights to use per vertex in correspondences
     Returns
     -------
     Cx: ndarray(d, 1)
@@ -93,6 +95,8 @@ def getProcrustesAlignment(X, Y, idx):
         A dxd rotation matrix to rotate and align X to Y after
         they have both been centered on their centroids Cx and Cy
     """
+    if weights.size == 0:
+        weights = np.ones(X.shape[1])
     Cx = getCentroid(X)
     #Pull out the corresponding points in Y by using numpy
     #indexing notation along the columns
@@ -102,6 +106,7 @@ def getProcrustesAlignment(X, Y, idx):
     #Subtract the centroid from both X and YCorr with broadcasting
     XC = X - Cx
     YCorrC = YCorr - Cy
+    YCorrC *= weights[None, :]
     #Compute the singular value decomposition of YCorrC*XC^T.  Remember, it's
     #the point cloud we want to rotate that goes on the right (a common mistake
     #was to flip these)
@@ -109,7 +114,7 @@ def getProcrustesAlignment(X, Y, idx):
     R = U.dot(VT)
     return (Cx, Cy, R)    
 
-def doICP(X, Y, MaxIters, verbose=False):
+def doICP(X, Y, MaxIters, corresp=np.array([]), weights = np.array([]), verbose=False):
     """
     The loop which ties together correspondence finding
     and procrustes alignment to implement the iterative closest points algorithm
@@ -122,6 +127,10 @@ def doICP(X, Y, MaxIters, verbose=False):
         d x N matrix of points in Y (the target point cloud)
     MaxIters: int
         Maximum number of iterations to perform, regardless of convergence
+    corresp: ndarray(L, 2)
+        A list of L correspondences
+    weights: ndarray(M)
+        Weights to use in Procrustes (or empty if uniform weights)
     Returns
     -------
     CxList: 
@@ -142,6 +151,8 @@ def doICP(X, Y, MaxIters, verbose=False):
     RxList = [np.eye(d)]
     idxList = []
     lastidx = np.zeros(X.shape[1])
+    if weights.size == 0:
+        weights = np.ones(X.shape[1])
     for i in range(MaxIters):
         #Get the last estimated centroids and rotation matrix using
         #a convenient Python indexing trick
@@ -150,13 +161,15 @@ def doICP(X, Y, MaxIters, verbose=False):
         Rx = RxList[-1]
         #Find new correspondences using the current estimate of the alignment
         idx = getCorrespondences(X, Y, Cx, Cy, Rx)
+        if corresp.size > 0:
+            idx[corresp[:, 0]] = corresp[:, 1]
         #Check for convergence by seeing if all of the correspondences are
         #the same as they were last time
         if np.sum(np.abs(idx-lastidx)) == 0:
             break
         lastidx = idx
         #Perform procrustes alignment using these new correspondences
-        (Cx, Cy, Rx) = getProcrustesAlignment(X, Y, idx)
+        (Cx, Cy, Rx) = getProcrustesAlignment(X, Y, idx, weights)
         #Put this new alignment estimate on the back of the lists
         CxList.append(Cx)
         CyList.append(Cy)
@@ -200,7 +213,7 @@ def get_rotation_lowrank(X, Y, scale_norm=True):
 
 
 
-def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10, scale_norm=True, do_plot=False, cmap='magma_r'):
+def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), weights=np.array([]), initial_guesses=10, MaxIters=100, scale_norm=True, do_plot=False, cmap='magma_r'):
     """
     Do ICP on a set of observations from a PDE
     Parameters
@@ -215,8 +228,12 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
         Dimension-reduced version of second set of patches
     corresp: ndarray(L, 2)
         A list of L correspondences
+    weights: ndarray(M)
+        Weights to use in Procrustes (or empty if uniform weights)
     initial_guesses: int
         Number of initial guesses to take
+    MaxIters: int
+        Maximum number of iterations to perform, regardless of convergence
     scale_norm: boolean
         RMS Normalize point clouds for scale
     do_plot: boolean
@@ -300,7 +317,7 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
         Y1i = (Y1 - C1[None, :]).T
         Y2i = (Y2 - C2[None, :]).T
         Y1i = R.dot(Y1i)
-        CxList, CyList, RxList, idxList = doICP(Y1i, Y2i, MaxIters=100)
+        CxList, CyList, RxList, idxList = doICP(Y1i, Y2i, MaxIters, corresp, weights)
         Xs = pde2.Xs[idxList[-1]]
         Ts = pde2.Ts[idxList[-1]]
         rmse = get_rmse(idxList[-1])
@@ -360,6 +377,8 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), initial_guesses=10
             """
             plt.subplot(121)
             plt.scatter(Xs, Ts, c=patch_centers, cmap='RdGy')
+            if corresp.size > 0:
+                plt.scatter(Xs[corresp[:, 0]], Ts[corresp[:, 1]], 60, 'C2')
             plt.xticks([0, 0.5, 1], ["0", "$\\pi$", "$2 \\pi$"])
             plt.yticks([0, 0.5, 1], ["0", "$\\pi$", "$2 \\pi$"])
             plt.xlabel("$\\theta$")

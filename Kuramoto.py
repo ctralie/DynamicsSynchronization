@@ -92,6 +92,11 @@ class KSSimulation(PDE2D):
         else:
             plt.imshow(self.I, interpolation='nearest', aspect='auto', cmap='RdGy')
     
+    def concatenateOther(self, other):
+        PDE2D.concatenateOther(self, other)
+        self.xcoords = np.concatenate((self.xcoords, other.xcoords))
+        self.tcoords = np.concatenate((self.tcoords, other.tcoords))
+
     def completeObservations(self):
         """
         Save the plot coordinates for x and t as a side effect of the ordinary
@@ -101,6 +106,16 @@ class KSSimulation(PDE2D):
         tcoords = np.array(np.round(self.Ts), dtype=int)
         self.tcoords = self.get_t_periodcoords(self.ts[tcoords])
         PDE2D.completeObservations(self)
+
+    def resort_byraster(self, resy=20):
+        idx = approximate_rasterorder(self.Xs, self.Ts, resy)
+        self.Xs = self.Xs[idx]
+        self.Ts = self.Ts[idx]
+        self.thetas = self.thetas[idx]
+        self.patches = self.patches[idx, :]
+        self.xcoords = self.xcoords[idx]
+        self.tcoords = self.tcoords[idx]
+        return idx
 
     def makeVideo(self, Y, D = np.array([]), skip=20, cmap='viridis'):
         """

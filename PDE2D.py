@@ -189,6 +189,22 @@ class PDE2D(object):
         self.pca = None
         self.rotate_patches = False
 
+    def concatenateOther(self, other):
+        """
+        Add the observations from another system
+        This assumes that the same patch dimensions, patch observation
+        function, and PCA dimension were used
+        Parameters
+        ----------
+        other: PDE2D
+            The other PDE with the same parameters
+        """
+        self.Xs = np.concatenate((self.Xs, other.Xs))
+        self.Ts = np.concatenate((self.Ts, other.Ts))
+        self.thetas = np.concatenate((self.thetas, other.thetas))
+        self.patches = np.concatenate((self.patches, other.patches), axis=0)
+
+
     def completeObservations(self):
         """
         Sample all of the patches once their positions and orientations
@@ -612,6 +628,7 @@ class PDE2D(object):
         self.Ts = self.Ts[idx]
         self.thetas = self.thetas[idx]
         self.patches = self.patches[idx, :]
+        return idx
 
     def get_patch(self, idx):
         """

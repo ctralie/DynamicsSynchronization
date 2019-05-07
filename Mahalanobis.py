@@ -88,8 +88,13 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
     ## Step 2: Compute squared Mahalanobis distance between
     ## all pairs of points, as well as a mask for which
     ## pairwise distances should actually be included from it
+    DSqr = np.sum(X**2, 1)
+    DSqr = DSqr[:, None] + DSqr[None, :] - 2*X.dot(X.T)
     gamma = np.zeros((N, N))
-    mask = np.ones((N, N))
+    mask = np.ones((N, N), dtype=np.bool)
+    # Keep track of the minimum number of eigenvectors at which
+    # each edge is removed
+    maskidx = maxeigs*np.ones((N, N), dtype=int) 
     #Create a matrix whose ith row and jth column contains
     #the dot product of patch i and eigenvector vjk
     D = np.zeros((N, N, maxeigs))
@@ -114,24 +119,22 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
             # Mahalanobis distance contribution
             gamma += pij/wk[:, None]
             gamma += pji/wk[None, :]
-        # Mask contribution
+        # Mask contribution of this level
         projMagsSqr += pij
         mask *=  pij < wk[:, None]*jacfac
+        # What the finalized mask would be at this level
+        maskf = mask*((DSqr-projMagsSqr) < (d-k-1)*wk[:, None]*jacfac)
+        maskidx[maskf == 0] = np.minimum(maskidx[maskf == 0], k)
+    
+    maskidx = np.minimum(maskidx, maskidx.T)
     # Finalize Mahalanobis dist by applying a global scale
     gamma *= 0.5*(delta**2)/(rank+2)
-    # Finalize mask by checking that remainder of squared distance
-    # components are within the remaining components of the ellipsoid
-    DSqr = np.sum(X**2, 1)
-    DSqr = DSqr[:, None] + DSqr[None, :] - 2*X.dot(X.T)
-    if d-maxeigs > 0:
-        wk = ws[:, -1]
-        mask *= (DSqr - projMagsSqr) < (d-maxeigs)*wk[:, None]*jacfac
-    mask *= mask.T
+    #mask = maskidx >= maxeigs
     # Make sure diagonal of mask is 1
     mask = np.maximum(mask, np.eye(mask.shape[0]))
     if verbose:
         print("Elapsed Time: %.3g"%(time.time()-tic))
-    return {'gamma':gamma, 'mask':mask, 'rank_est':rank_est, 'DSqr':DSqr, 'vs':vs, 'ws':ws}
+    return {'gamma':gamma, 'mask':mask, 'maskidx':maskidx, 'rank_est':rank_est, 'DSqr':DSqr, 'vs':vs, 'ws':ws}
 
 
 
@@ -161,11 +164,11 @@ def getMushroomEllipsoid(X0, idx, delta, n_points):
 
 def testMahalanobisMushroom():
     np.random.seed(0)
-    N = 1000
+    N = 2000
     X = np.random.rand(N, 2)
     Y = getMushroom(X)
     fn_ellipsoid = lambda idx, delta, n_points: getMushroomEllipsoid(X, idx, delta, n_points)
-    res = getMahalanobisDists(Y, fn_ellipsoid, 0.001, 100, 2)
+    res = getMahalanobisDists(Y, fn_ellipsoid, 0.01, 100, 2)
     gamma = res["gamma"]
     dMaxSqrCoeff=0.5
 
@@ -584,5 +587,5 @@ def testMahalanobisTimeSeries():
 if __name__ == '__main__':
     #testMahalanobisCircle()
     #testMahalanobisMushroom()
-    #testMahalanobisSphere()
-    testMahalanobisTimeSeries()
+    testMahalanobisSphere()
+    #testMahalanobisTimeSeries()

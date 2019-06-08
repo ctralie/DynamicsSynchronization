@@ -340,28 +340,32 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), weights=np.array([
     patch_centers = f_interp(pde1.Ts.flatten(), pde1.Xs.flatten(), grid=False)
 
     if do_plot:
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=(12, 8))
         for i, idx in enumerate(idxMin):
             Xs = pde2.Xs[idx]
             Ts = pde2.Ts[idx]
             plt.clf()
             idx = np.array(idx)
-            """
+            #"""
             plt.subplot(231)
             plt.scatter(pde1.Xs, pde1.Ts, c=Xs, cmap=cmap)
+            if corresp.size > 0:
+                plt.scatter(pde1.Xs[corresp[:, 0]], pde1.Ts[corresp[:, 0]], 60, 'C2')
             plt.title("Patch Locs Colored By Xs")
             plt.subplot(232)
             plt.scatter(pde1.Xs, pde1.Ts, c=Ts, cmap=cmap)
+            if corresp.size > 0:
+                plt.scatter(pde1.Xs[corresp[:, 0]], pde1.Ts[corresp[:, 0]], 60, 'C2')
             plt.title("Patch Locs Colored by Ts")
             plt.subplot(233)
-            """
-            plt.subplot(122)
+            #"""
+            #plt.subplot(122)
             plt.plot(rmses_iter)
             plt.scatter([i], [rmses_iter[i]])
             plt.xlabel("Iteration number")
             plt.title("ICP Iteration %i, RMSE=%.3g"%(i, rmses_iter[i]))
             plt.ylabel("RMSE")
-            """
+            #"""
             plt.subplot(234)
             plt.scatter(Xs, Ts, c=pde1.Xs, cmap=cmap)
             plt.xlabel("Xs Flat Torus")
@@ -374,11 +378,11 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), weights=np.array([
             plt.title("Xs, Ts, Colored By Loc T")
             D2 = getSSM(Y2[idx, :])
             plt.subplot(236)
-            """
-            plt.subplot(121)
+            #"""
+            #plt.subplot(121)
             plt.scatter(Xs, Ts, c=patch_centers, cmap='RdGy')
             if corresp.size > 0:
-                plt.scatter(Xs[corresp[:, 0]], Ts[corresp[:, 1]], 60, 'C2')
+                plt.scatter(Xs[corresp[:, 0]], Ts[corresp[:, 0]], 60, 'C2', marker='x')
             plt.xticks([0, 0.5, 1], ["0", "$\\pi$", "$2 \\pi$"])
             plt.yticks([0, 0.5, 1], ["0", "$\\pi$", "$2 \\pi$"])
             plt.xlabel("$\\theta$")
@@ -402,3 +406,48 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), weights=np.array([
             plt.savefig("ICP%i.png"%i, bbox_inches='tight')
     
     return {'idxMin':idxMin, 'rmses_iter':rmses_iter}
+
+def ICPConceptFigure():
+    np.random.seed(0)
+    N = 20
+    fac = 0.6
+    t1 = np.linspace(0, 1, N)*2*np.pi
+    t1 *= fac
+    X = np.array([np.cos(t1), np.sin(2*t1)])
+    t2 = (np.linspace(0, 1, N)**2)*2*np.pi
+    t2 *= fac
+    Y = np.array([np.cos(t2), np.sin(2*t2)])
+    theta = np.random.rand()
+    R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    Y = R.dot(Y)
+    Y += np.array([[0], [3]])
+    X, Y = Y, X
+
+    (CxList, CyList, RxList, idxList) = doICP(X, Y, 100)
+    NIters = 7
+    ncols = int((NIters+1)/2)
+    res = 3
+    plt.figure(figsize=(res*ncols, res*2))
+    plt.subplot(2, ncols, 1)
+    plt.scatter(X[0, :], X[1, :])
+    plt.scatter(Y[0, :], Y[1, :])
+    plt.axis('equal')
+    plt.axis('off')
+    plt.title("Original Point Clouds")
+    for i in range(NIters):
+        plt.subplot(2, ncols, 2+i)
+        X2 = X - CxList[i]
+        Y2 = Y - CyList[i]
+        X2 = RxList[i].dot(X2)
+        plt.scatter(X2[0, :], X2[1, :])
+        plt.scatter(Y2[0, :], Y2[1, :])
+        for i1, j1 in enumerate(idxList[i]):
+            plt.plot([X2[0, i1], Y2[0, j1]], [X2[1, i1], Y2[1, j1]], 'k')
+        plt.axis('equal')
+        plt.axis('off')
+        plt.title("Iteration %i"%(i+1))
+    plt.savefig("ICPConcept.svg", bbox_inches='tight')
+
+
+if __name__ == '__main__':
+    ICPConceptFigure()

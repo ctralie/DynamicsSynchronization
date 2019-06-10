@@ -7,6 +7,7 @@ from PDE2D import *
 from PatchDescriptors import *
 from ICP import *
 from Mahalanobis import *
+from DiffusionMaps import getDiffusionMap
 
 class Parabaloid(PDE2D):
     def __init__(self, M, N):
@@ -136,8 +137,10 @@ class FlatTorusIdeal(PDE2D):
         mask = np.ones_like(DSqr)
         mask[np.abs(dx) > neighb_cutoff] = 0
         mask[np.abs(dy) > neighb_cutoff] = 0
-        Y = doDiffusionMaps(DSqr, theta, mask=mask, neigs=K+1, do_plot=do_plot)
+
+        Y = getDiffusionMap(DSqr, np.max(DSqr)*1e-3, distance_matrix=True, mask=mask, neigs=K+1)
         if do_plot:
+            from PDEND import largeimg
             plt.figure(figsize=(12, 6))
             plt.subplot(121)
             plt.imshow(largeimg(DSqr), cmap='magma_r')

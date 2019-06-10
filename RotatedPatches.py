@@ -213,13 +213,15 @@ def testRotationRecovery(save_frames = True):
     vmin = -vmax
 
     x1 = np.array([120, 100])
-    x2 = x1 + np.array([20, 20])
+    offset = np.array([20, 20])
+    x2 = x1 + offset
     
     ks.Xs = np.array([x1[0], x2[0]])
     ks.Ts = np.array([x1[1], x2[1]])
     ks.pd = (dim, dim)
 
-    plt.figure(figsize=(15, 10))
+    figfac = 0.7
+    plt.figure(figsize=(figfac*15, figfac*10))
     thetas = []
     thetas_est = []
     for i in range(100):
@@ -239,24 +241,38 @@ def testRotationRecovery(save_frames = True):
         if save_frames:
             plt.clf()
             plt.subplot(231)
-            plt.imshow(p1, vmin=vmin, vmax=vmax)
-            plt.title("%.3g: %.3g,\n%.3g: %.3g"%corr_vals)
+            plt.imshow(p1, vmin=vmin, vmax=vmax, cmap='RdGy')
+            #plt.title("%.3g: %.3g,\n%.3g: %.3g"%corr_vals)
+            plt.axis('off')
+            plt.title("Patch 1")
             plt.subplot(232)
-            plt.imshow(p2, vmin=vmin, vmax=vmax)
+            plt.imshow(p2, vmin=vmin, vmax=vmax, cmap='RdGy')
+            plt.axis('off')
+            plt.title("Patch 2\nOffset = (%i, %i), theta = %.3g"%(offset[0], offset[1], thetas[-1]*180/np.pi))
             plt.subplot(233)
             plt.imshow(corr)
-            plt.colorbar()
+            #plt.colorbar()
             plt.scatter([idxcorr[1]], [idxcorr[0]])
-            plt.title("(%i, %i)"%tuple(idxcorr))
+            #plt.title("(%i, %i)"%tuple(idxcorr))
+            plt.title("Translational Cross-Correlation")
             plt.subplot(234)
-            plt.imshow(polar1, aspect='auto')
+            plt.imshow(polar1, aspect='auto', extent=(0, 360, 20, 0))
+            plt.xlabel("Theta")
+            plt.ylabel("r")
+            plt.title("Polar 2D FFT of Masked Patch 1")
             plt.subplot(235)
-            plt.imshow(polar2, aspect='auto')
+            plt.imshow(polar2, aspect='auto', extent=(0, 360, 0, 20))
+            plt.xlabel("Theta")
+            plt.ylabel("r")
+            plt.title("Polar 2D FFT of Masked Patch 2")
             plt.subplot(236)
-            plt.plot(x)
-            plt.stem([idx], x[idx:idx+1])
-            plt.title("theta=%.3g, theta_est=%.3g"%(thetas[-1], thetas_est[-1]))
-            plt.savefig("%i.png"%i)
+            plt.plot(np.linspace(0, 360, x.size), x)
+            plt.stem([theta_est*180/np.pi], x[idx:idx+1])
+            plt.xlabel("Theta Offset")
+            plt.ylabel("Correlation")
+            plt.title("theta_est=%.3g"%(thetas_est[-1]*180/np.pi))
+            plt.tight_layout()
+            plt.savefig("%i.svg"%i, bbox_inches='tight')
             
 
 

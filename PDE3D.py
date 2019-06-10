@@ -6,17 +6,22 @@ import sklearn.feature_extraction.image as skimage
 import time
 from scipy import interpolate
 import scipy.sparse as sparse
-import scipy.misc
+from sklearn.decomposition import PCA
+import skimage.transform
 from mpl_toolkits.mplot3d import Axes3D
 import sys
 import warnings
 from DiffusionMaps import *
+from Mahalanobis import *
 from LocalPCA import *
 from PatchDescriptors import *
-from PDE2D import *
+from RotatedPatches import estimate_rotangle
+from ConnectionLaplacian import getConnectionLaplacian
+import subprocess
+from PDEND import *
 
 
-class PDE3D(object):
+class PDE3D(PDEND):
     """
     Attributes
     ----------
@@ -37,14 +42,17 @@ class PDE3D(object):
         The dimensions of each patch (time, width, height)
     f: function ndarray->ndarray
         A pointwise homeomorphism to apply to pixels in the observation function
+    f_patch: funtion: ndarray(n_patches, n_pixels) -> ndarray(n_patches, n_features)
+        A function to apply to all patches
+    pca: sklearn.decomposition.PCA
+        A PCA object if the patch function should be composed with
+        a linear dimension reduction
     """
     def __init__(self):
-        self.I = np.array([[]])
+        PDEND.__init__(self)
         self.L = np.array([[]])
         self.periodic_x = False
         self.periodic_y = False
-        self.f_pointwise = lambda x: x
-        self.f_patch = lambda x: x
 
     def compute_laplacian2D(self):
         """
@@ -63,7 +71,6 @@ class PDE3D(object):
                     index = abs(di) + abs(dj)
                     self.L[t, :, :] += weights[index]*np.roll(np.roll(ft, di, axis=0), dj, axis=1)
 
-
     def draw_frame(self, i):
         plt.imshow(self.I[i, :, :], interpolation='none', aspect='auto', cmap='RdGy')
     
@@ -72,27 +79,56 @@ class PDE3D(object):
         Create a 2D rect bivariate spline interpolator to sample
         from the solution set with interpolation
         """
-        ## Step 1: Setup interpolator
-        I = self.I
-        t = np.arange(I.shape[0])
-        x = np.arange(I.shape[1])
-        y = np.arange(I.shape[2])
-        if self.periodic_x:
-            x = x[None, :]*np.ones((3, 1))
-            x[0, :] -= I.shape[1]
-            x[2, :] += I.shape[1]
-            x = x.flatten()
-            I = np.concatenate((I, I, I), 1) #Periodic boundary conditions in space
-        if self.periodic_y:
-            y = y[None, :]*np.ones((3, 1))
-            y[0, :] -= I.shape[2]
-            y[2, :] += I.shape[2]
-            y = y.flatten()
-            I = np.concatenate((I, I, I), 2)
-        return interpolate.RegularGridInterpolator((t, x, y), I, method="linear")
+        if not self.f_interp:
+            ## Step 1: Setup interpolator
+            I = self.I
+            t = np.arange(I.shape[0])
+            x = np.arange(I.shape[1])
+            y = np.arange(I.shape[2])
+            if self.periodic_x:
+                x = x[None, :]*np.ones((3, 1))
+                x[0, :] -= I.shape[1]
+                x[2, :] += I.shape[1]
+                x = x.flatten()
+                I = np.concatenate((I, I, I), 1) #Periodic boundary conditions in space
+            if self.periodic_y:
+                y = y[None, :]*np.ones((3, 1))
+                y[0, :] -= I.shape[2]
+                y[2, :] += I.shape[2]
+                y = y.flatten()
+                I = np.concatenate((I, I, I), 2)
+            self.f_interp = interpolate.RegularGridInterpolator((t, x, y), I, method="linear")
+        return self.f_interp
 
     def makeObservationsTimeSeries(self, win, hop):
         pass
+
+    def completeObservations(self):
+        """
+        Sample all of the patches once their positions and orientations
+        have been fixed
+        """
+        tic = time.time()
+        f_interp = self.getInterpolator()
+        # Now sample all patches
+        pd = self.pd
+        pdt, pdx, pdy = np.meshgrid(even_interval(pd[0]), even_interval(pd[1]), even_interval(pd[2]), indexing='ij')
+        pdt = pdt.flatten()
+        pdx = pdx.flatten()
+        pdy = pdy.flatten()
+
+        # Setup all coordinate locations to sample
+        cs, ss = np.cos(self.thetas), np.sin(self.thetas)
+        xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdy[None, :] + self.Xs[:, None]
+        ys = ss[:, None]*pdx[None, :] + cs[:, None]*pdy[None, :] + self.Ys[:, None]
+        ts = self.Ts[:, None] + pdt[None, :]
+        
+        # Use interpolator to sample coordinates for all patches
+        coords = np.array([ts.flatten(), xs.flatten(), ys.flatten()]).T
+        patches = f_interp(coords)
+        patches = np.reshape(patches, ts.shape)
+        self.patches = self.f_patch(self.f_pointwise(patches))
+        print("Elapsed time patch sampling: %.3g"%(time.time()-tic))
 
     def makeObservations(self, pd, nsamples, uniform=True, periodic_x=False, periodic_y=False, rotate = False, \
                             buff = [0.0, 0.0, 0.0], f_pointwise = lambda x: x, f_patch = lambda x: x):
@@ -100,27 +136,30 @@ class PDE3D(object):
         Make random rectangular observations (possibly with rotation)
         Parameters
         ----------
-        pd: tuple(int, int)
-            The dimensions of each patch (height, width)
+        pd: tuple(int, int, int)
+            The dimensions of each patch (time, height, width)
         nsamples: int or tuple(int, int, int)
             The number of patches to sample, or the dimension of the 
             uniform grid from which to sample patches
         uniform: boolean
             Whether to sample the centers uniformly spatially
-        periodic: boolean
-            Whether to enforce periodic boundary conditions
+        periodic_x: boolean
+            Whether to enforce periodic boundary conditions in x
+        periodic_y: boolean
+            Whether to enforce periodic boundary conditions in x
         rotate: boolean
             Whether to randomly rotate the patches in the XY plane
-        buff: tuple(float, float, float)
+        buff: list(float, float, float)
             A buffer to include around the edges of the patches 
             that are sampled.  If periodic is true, only use
             this buffer in the time axis (the first element)
         f_pointwise: function ndarray->ndarray
             A pointwise homeomorphism to apply to pixels in the observation function
+        f_patch: function ndarray->ndarray
+            A function to apply to each patch to create a new set of observables (e.g. FTM2D)
         """
         self.periodic_x = periodic_x
         self.periodic_y = periodic_y
-        f_interp = self.getInterpolator()
         # Make sure all patches are within the spacetime limits
         rotstr = ""
         rs = np.array(buff) + np.array(pd)/2.0
@@ -178,27 +217,7 @@ class PDE3D(object):
             self.thetas = np.random.rand(self.Xs.size)*2*np.pi
         else:
             self.thetas = np.zeros_like(self.Xs)
-
-        # Now sample all patches
-        pdt, pdx, pdy = np.meshgrid(even_interval(pd[0]), even_interval(pd[1]), even_interval(pd[2]), indexing='ij')
-        pdt = pdt.flatten()
-        pdx = pdx.flatten()
-        pdy = pdy.flatten()
-
-        # Setup all coordinate locations to sample
-        cs, ss = np.cos(self.thetas), np.sin(self.thetas)
-        xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdy[None, :] + self.Xs[:, None]
-        ys = ss[:, None]*pdx[None, :] + cs[:, None]*pdy[None, :] + self.Ys[:, None]
-        ts = self.Ts[:, None] + pdt[None, :]
-        
-        # Use interpolator to sample coordinates for all patches
-        coords = np.array([ts.flatten(), xs.flatten(), ys.flatten()]).T
-        print(np.min(coords, 0))
-        print(np.max(coords, 0))
-        patches = f_interp(coords)
-        patches = np.reshape(patches, ts.shape)
-        self.patches = f_patch(f_pointwise(patches))
-        print(self.patches.shape)
+        self.completeObservations()
 
     def getMahalanobisDists(self, delta, n_points, d = -10, maxeig = 10, kappa = 1):
         """
@@ -228,113 +247,6 @@ class PDE3D(object):
             neighbors to use, in the original patch metric
         """
         pass
-
-    
-    def plotPatchBoundary(self, i, draw_arrows=True):
-        """
-        Plot a rectangular outline of the ith patch
-        along with arrows at its center indicating
-        the principal axes
-        Parameters
-        ----------
-        i: int
-            Index of patch
-        """
-        pdx = even_interval(self.pd[1])
-        pdy = even_interval(self.pd[2])
-        x0, x1 = pdx[0], pdx[-1]
-        y0, y1 = pdy[0], pdy[-1]
-        x = np.array([[x0, y0], [x0, y1], [x1, y1], [x1, y0], [x0, y0]])
-        c, s = np.cos(self.thetas[i]), np.sin(self.thetas[i])
-        R = np.array([[c, -s], [s, c]])
-        xc = self.Xs[i]
-        yc = self.Ys[i]
-        x = (R.dot(x.T)).T + np.array([[xc, yc]])
-        plt.plot(x[:, 0], x[:, 1], 'C0')
-        ax = plt.gca()
-        R[:, 0] *= self.pd[1]/2
-        R[:, 1] *= self.pd[2]/2
-        if draw_arrows:
-            ax.arrow(xc, yc, R[0, 0], R[1, 0], head_width = 5, head_length = 3, fc = 'c', ec = 'c', width = 1)
-            ax.arrow(xc, yc, R[0, 1], R[1, 1], head_width = 5, head_length = 3, fc = 'g', ec = 'g', width = 1)
-
-
-    def makePatchVideos(self):
-        """
-        Make a video of the patches
-        """
-        plt.figure(figsize=(12, 6))
-        for i in range(self.patches.shape[0]):
-            t = int(np.round(self.Ts[i]))
-            patch = np.reshape(self.patches[i, :], self.pd)
-            for k in range(patch.shape[0]):
-                plt.clf()
-                plt.subplot(121)
-                self.draw_frame(t)
-                self.plotPatchBoundary(i)
-                plt.title("Patch %i"%i)
-                plt.subplot(122)
-                plt.imshow(patch[k, :, :], interpolation='none', aspect='auto', cmap='RdGy')
-                plt.title("Frame %i"%k)
-                plt.savefig("%i_%i.png"%(i, k))
-
-
-
-    def makeVideo(self, Y, D = np.array([]), skip=1, cmap='magma_r', plot_boundaries=True, colorvar=np.array([])):
-        """
-        Make a video given a nonlinear dimension reduction, which
-        is assumed to be indexed parallel to the patches
-        """
-        if colorvar.size == 0:
-            colorvar = self.Xs
-        c = plt.get_cmap(cmap)
-        C = c(np.array(np.round(255.0*colorvar/np.max(colorvar)), dtype=np.int32))
-        C = C[:, 0:3]
-        sprefix = 120
-        if D.size > 0:
-            fig = plt.figure(figsize=(18, 6))
-            sprefix = 130
-        else:
-            fig = plt.figure(figsize=(12, 6))
-        I, Ts, Xs, Ys = self.I, self.Ts, self.Xs, self.Ys
-
-        idx = 0
-        N = Y.shape[0]
-        for i in range(0, N, skip):
-            t = int(np.round(self.Ts[i]))
-            plt.clf()
-            plt.subplot(sprefix+1)
-            self.draw_frame(t)
-            if plot_boundaries:
-                self.plotPatchBoundary(i)
-            plt.title("Frame %i Patch %i"%(t, i))
-
-            if Y.shape[1] == 3:
-                ax = plt.gcf().add_subplot(sprefix+2, projection='3d')
-                ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=np.array([[0, 0, 0, 0]]))
-                ax.scatter(Y[0:i+1, 0], Y[0:i+1, 1], Y[0:i+1, 2], c=C[0:i+1, :])
-                ax.scatter(Y[i, 0], Y[i, 1], Y[i, 2], 'r')
-            else:
-                plt.subplot(sprefix+2)
-                plt.scatter(Y[:, 0], Y[:, 1], 100, c=np.array([[0, 0, 0, 0]]))
-                plt.scatter(Y[0:i+1, 0], Y[0:i+1, 1], 20, c=C[0:i+1, :])
-                plt.scatter(Y[i, 0], Y[i, 1], 40, 'r')
-                plt.axis('equal')
-                ax = plt.gca()
-                ax.set_facecolor((0.15, 0.15, 0.15))
-                ax.set_xticks([])
-                ax.set_yticks([])
-            if D.size > 0:
-                plt.subplot(133)
-                plt.imshow(D, cmap='magma_r', interpolation='none')
-
-                plt.plot([i, i], [0, N], 'c')
-                plt.plot([0, N], [i, i], 'c')
-                plt.xlim([0, N])
-                plt.ylim([N, 0])
-
-            plt.savefig("%i.png"%idx)
-            idx += 1
 
     def plot_complex_3d_hist(self, res, log_density=True):
         """

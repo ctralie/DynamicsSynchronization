@@ -32,7 +32,7 @@ if __name__ == '__main__':
         mask = res["mask"]
         t = dMaxSqrCoeff*np.max(gamma)
         tic = time.time()
-        Y = getDiffusionMap(gamma, t, mask=mask, distance_matrix=True, neigs=6, thresh=1e-10)
+        Y = getDiffusionMap(gamma, t, mask=mask, distance_matrix=True, neigs=6, flip=True, thresh=1e-10)
         print("Elapsed Time Diffusion Maps: %.3g"%(time.time()-tic))
 
         gammadisp = np.array(gamma)
@@ -51,7 +51,8 @@ if __name__ == '__main__':
         namestr = "DiffusionMaps"
         D = np.sum(X**2, 1)[:, None]
         DSqr = D + D.T - 2*X.dot(X.T)
-        Y = doDiffusionMaps(DSqr, X[:, 0], dMaxSqrCoeff=100, do_plot=False)
+        eps = np.max(DSqr)*0.1
+        Y = getDiffusionMap(DSqr, eps=eps, distance_matrix=True, neigs=6, flip=True, thresh=1e-10)
     Y = Y[:, 0:3]
     fig = plt.figure(figsize=(16, 6))
     a = SlidingWindowAnimator("MahalanobisTimeSeries_%s.mp4"%namestr, fig, x, Y, dim, Tau, dT, hop=5)

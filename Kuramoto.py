@@ -8,9 +8,9 @@ from PDE2D import *
 from Mahalanobis import *
 
 class KSSimulation(PDE2D):
-    def __init__(self, co_rotating = False, scale=(1.0, 1.0)):
+    def __init__(self, co_rotating = False, scale=(1.0, 1.0), reldir='./'):
         PDE2D.__init__(self)
-        res = sio.loadmat("KS.mat")
+        res = sio.loadmat("%s/KS.mat"%reldir)
         self.I = res["data"]
         self.c = res["c"] # Traveling wave factor
         self.scale = scale

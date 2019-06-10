@@ -90,14 +90,14 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
     ## pairwise distances should actually be included from it
     DSqr = np.sum(X**2, 1)
     DSqr = DSqr[:, None] + DSqr[None, :] - 2*X.dot(X.T)
-    gamma = np.zeros((N, N))
+    gamma = np.zeros((N, N), dtype=np.float32)
     mask = np.ones((N, N), dtype=np.bool)
     # Keep track of the minimum number of eigenvectors at which
     # each edge is removed
     maskidx = maxeigs*np.ones((N, N), dtype=int) 
     #Create a matrix whose ith row and jth column contains
     #the dot product of patch i and eigenvector vjk
-    D = np.zeros((N, N, maxeigs))
+    D = np.zeros((N, N, maxeigs), dtype=np.float32)
     for k in range(maxeigs):
         D[:, :, k] = X.dot(vs[:, :, k].T)
     if verbose:
@@ -106,7 +106,7 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
     # Keep a cumulative sum of projected squared magnitudes
     # of the squared distance vector between i and j
     # onto the eigenvectors in j
-    projMagsSqr = np.zeros((N, N)) 
+    projMagsSqr = np.zeros((N, N), dtype=np.float32) 
     for k in range(maxeigs):
         Dk = D[:, :, k]
         Dk_diag = np.diag(Dk)
@@ -157,18 +157,20 @@ def getMushroom(X):
 def getMushroomEllipsoid(X0, idx, delta, n_points):
     x0 = X0[idx, :]
     x0 = x0[None, :]
-    Y = delta*np.random.randn(n_points, 2) + x0
+    Y = np.random.randn(n_points, 2)
+    Y /= np.sqrt(np.sum(Y**2, 1))[:, None]
+    Y = Y*delta + x0
     Y = getMushroom(Y) - getMushroom(x0)
     return Y
 
 
 def testMahalanobisMushroom():
     np.random.seed(0)
-    N = 2000
+    N = 5000
     X = np.random.rand(N, 2)
     Y = getMushroom(X)
     fn_ellipsoid = lambda idx, delta, n_points: getMushroomEllipsoid(X, idx, delta, n_points)
-    res = getMahalanobisDists(Y, fn_ellipsoid, 0.01, 100, 2)
+    res = getMahalanobisDists(Y, fn_ellipsoid, 0.001, 400, 2)
     gamma = res["gamma"]
     dMaxSqrCoeff=0.5
 
@@ -193,12 +195,12 @@ def testMahalanobisMushroom():
     plt.subplot(241)
     plt.scatter(X[:, 1], X[:, 0], c=C1)
     plt.axis('equal')
-    plt.title("Original, Colored by x")
+    plt.title("Domain, Colored by x")
 
     plt.subplot(245)
     plt.scatter(X[:, 1], X[:, 0], c=C2)
     plt.axis('equal')
-    plt.title("Original, Colored by y")
+    plt.title("Domain, Colored by y")
 
     plt.subplot(242)
     plt.scatter(Y[:, 0], Y[:, 1], c=C1)
@@ -229,7 +231,7 @@ def testMahalanobisMushroom():
     plt.scatter(YM[:, 0], YM[:, 1], c=C2)
     plt.axis('equal')
     plt.title("Mahalanobis, Colored by y")
-    plt.savefig("Mushroom.png")
+    plt.savefig("Mushroom.png", bbox_inches='tight')
 
 
 
@@ -384,15 +386,13 @@ def testMahalanobisSphere():
     YMask = getDiffusionMap(gamma, t, mask=mask, distance_matrix=True, neigs=6, thresh=1e-10)
     print("Elapsed Time Diffusion Maps: %.3g"%(time.time()-tic))
 
-    plt.figure(figsize=(10, 5))
-    ax = plt.gcf().add_subplot(121, projection='3d')
-    ax.scatter(YNoMask[:, 0], YNoMask[:, 1], YNoMask[:, 2])
-    plt.title("No Mask")
-    ax = plt.gcf().add_subplot(122, projection='3d')
-    ax.scatter(YMask[:, 0], YMask[:, 1], YMask[:, 2])
+    plt.figure(figsize=(15, 10))
+    ax = plt.gcf().add_subplot(231, projection='3d')
+    ax.scatter(YMask[:, 0], YMask[:, 1], YMask[:, 2], c=X0[:, 2])
     plt.title("Mask")
-    plt.show()
-
+    ax = plt.gcf().add_subplot(234, projection='3d')
+    ax.scatter(YNoMask[:, 0], YNoMask[:, 1], YNoMask[:, 2], c=X0[:, 2])
+    plt.title("No Mask")
 
     tic = time.time()
     dgms_mask_2 = ripser(YMask, coeff=2, maxdim=2)['dgms']
@@ -408,20 +408,22 @@ def testMahalanobisSphere():
     dgms_nomask_3 = ripser(YNoMask, coeff=3, maxdim=2)['dgms']
     print("Elapsed Time TDA no mask Z/3Z: %.3g"%(time.time()-tic))
 
-    plt.figure(figsize=(10, 10))
-    plt.subplot(221)
+    plt.subplot(232)
     plot_dgms(dgms_mask_2)
-    plt.title("Mask, Z/2")
-    plt.subplot(222)
+    plt.title("Mask, $\mathbb{Z}/2$")
+    plt.subplot(233)
     plot_dgms(dgms_mask_3)
-    plt.title("Mask, Z/3")
-    plt.subplot(223)
+    plt.title("Mask, $\mathbb{Z}/3$")
+    plt.subplot(235)
     plot_dgms(dgms_nomask_2)
-    plt.title("No Mask, Z/2")
-    plt.subplot(224)
+    plt.title("No Mask, $\mathbb{Z}/2$")
+    plt.subplot(236)
     plot_dgms(dgms_nomask_3)
-    plt.title("No Mask, Z/3")
-    plt.savefig("SphereDGMS.svg", bbox_inches='tight')
+    plt.title("No Mask, $\mathbb{Z}/3$")
+
+    plt.show()
+
+    #plt.savefig("SphereDGMS.svg", bbox_inches='tight')
     
 
 """###################################################
@@ -540,7 +542,7 @@ def testMahalanobisTimeSeries():
     x += 0.001*np.random.randn(x.size)
     """
 
-    dim = 60
+    dim = 200
     Tau = 1
     dT = np.pi/3
     X = getSlidingWindow(x, dim, Tau, dT)
@@ -579,7 +581,8 @@ def testMahalanobisTimeSeries():
         namestr = "DiffusionMaps"
         D = np.sum(X**2, 1)[:, None]
         DSqr = D + D.T - 2*X.dot(X.T)
-        Y = doDiffusionMaps(DSqr, X[:, 0], dMaxSqrCoeff=100, do_plot=False)
+        eps = np.max(DSqr)
+        Y = getDiffusionMap(DSqr, eps, distance_matrix=True, neigs=3)
     Y = Y[:, 0:2]
     fig = plt.figure(figsize=(12, 6))
     a = SlidingWindowAnimator("MahalanobisTimeSeries_%s.mp4"%namestr, fig, x, Y, dim, Tau, dT, hop=2)
@@ -587,5 +590,5 @@ def testMahalanobisTimeSeries():
 if __name__ == '__main__':
     #testMahalanobisCircle()
     #testMahalanobisMushroom()
-    testMahalanobisSphere()
-    #testMahalanobisTimeSeries()
+    #testMahalanobisSphere()
+    testMahalanobisTimeSeries()

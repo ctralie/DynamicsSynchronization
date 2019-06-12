@@ -53,6 +53,7 @@ class PDE3D(PDEND):
         self.L = np.array([[]])
         self.periodic_x = False
         self.periodic_y = False
+        self.mc = None
 
     def compute_laplacian2D(self):
         """
@@ -219,34 +220,112 @@ class PDE3D(PDEND):
             self.thetas = np.zeros_like(self.Xs)
         self.completeObservations()
 
-    def getMahalanobisDists(self, delta, n_points, d = -10, maxeig = 10, kappa = 1):
+    def get_mahalanobis_ellipsoid_2DSpatial(self, idx, delta, n_points):
+        # function(ndarray(d) x0, int idx, float delta, int n_points) -> ndarray(n_points, d)
         """
-        Compute the Mahalanobis distance between all pairs of points
-        To quote from the Singer/Coifman paper:
-        "Suppose that we can identify which data points y (j ) belong to the 
-                ellipsoid E y (i) ,δ and which reside outside it"
-        Assume that an "equal space" ellipse is a disc of radius "delta"
-        in spacetime (since we are trying to find a map back to spacetime).  
-        Sample points uniformly at random within that disc, and
-        use observations centered at those points to compute Jacobian.
+        Return a centered ellipsoid at a fixed time, varying the two
+        spatial dimensions
         Parameters
         ----------
+        idx: int
+            Index of patch around which to compute the ellipsoid
         delta: float
-            Spacetime radius from which to sample
+            Radius of circle in spacetime to sample in preimage
         n_points: int
-            Number of points to sample in the disc
-        d: int (default -10)
-            If >0, the dimension of the Jacobian.
-            If <0, then pick the dimension at which the eigengap
-            exceeds |d|
-        maxeig: int (default 10)
-            The maximum number of eigenvectors to compute
-            (should be at least d)
-        kappa: float
-            A number in [0, 1] indicating the proportion of mutual nearest
-            neighbors to use, in the original patch metric
+            Number of points to sample in the ellipsoid
+        Returns
+        -------
+        ellipsoid: ndarray(n_points, patchdim)
+            Centered ellipsoid around patch at index idx
         """
-        pass
+        f_pointwise = self.f_pointwise
+        f_patch = self.f_patch
+        ## Step 2: For each patch, sample near patches in a disc
+        if not self.mc:
+            # Cache patch coordinates and interpolator
+            pd = self.pd
+            pdt, pdx, pdy = np.meshgrid(even_interval(pd[0]), even_interval(pd[1]), even_interval(pd[2]), indexing='ij')
+            pdt = pdt.flatten()
+            pdx = pdx.flatten()
+            pdy = pdy.flatten()
+            f_interp = self.getInterpolator()
+            self.mc = {'pdx':pdx, 'pdy':pdy, 'pdt':pdt, 'f_interp':f_interp}
+        pdx, pdy, pdt, f_interp = self.mc['pdx'], self.mc['pdy'], self.mc['pdt'], self.mc['f_interp']
+        y = self.patches[idx, :]
+        x0 = self.Xs[idx]
+        y0 = self.Ys[idx]
+        t0 = self.Ts[idx]
+        # Sample centers of each neighboring patch
+        # in a disc around the original patch
+        xc = x0 + delta*np.random.randn(n_points)
+        yc = y0 + delta*np.random.randn(n_points)
+        thetasorient = self.thetas[idx]*np.ones(n_points)
+        if self.rotate_patches:
+            # Randomly rotate each patch if using rotation invariant
+            thetasorient = 2*np.pi*np.random.rand(n_points)
+        cs = np.cos(-thetasorient)
+        ss = np.sin(-thetasorient)
+        xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdy[None, :] + xc[:, None]
+        ys = ss[:, None]*pdx[None, :] + cs[:, None]*pdy[None, :] + yc[:, None]
+        ts = np.ones((n_points, 1)) + pdt[None, :]
+        
+        # Use interpolator to sample coordinates for all patches
+        coords = np.array([ts.flatten(), xs.flatten(), ys.flatten()]).T
+        patches = f_interp(coords)
+        patches = np.reshape(patches, ts.shape)
+        # Apply function and center samples
+        Y = f_patch(f_pointwise(patches))
+        if self.pca:
+            Y = self.pca.transform(Y)
+        return Y - y[None, :]
+
+    def plotPatchBoundary(self, i, draw_arrows=True):
+        """
+        Plot a rectangular outline of the ith patch
+        along with arrows at its center indicating
+        the principal axes
+        Parameters
+        ----------
+        i: int
+            Index of patch
+        """
+        pdx = even_interval(self.pd[1])
+        pdy = even_interval(self.pd[2])
+        x0, x1 = pdx[0], pdx[-1]
+        y0, y1 = pdy[0], pdy[-1]
+        x = np.array([[x0, y0], [x0, y1], [x1, y1], [x1, y0], [x0, y0]])
+        c, s = np.cos(self.thetas[i]), np.sin(self.thetas[i])
+        R = np.array([[c, -s], [s, c]])
+        xc = self.Xs[i]
+        yc = self.Ys[i]
+        x = (R.dot(x.T)).T + np.array([[xc, yc]])
+        plt.plot(x[:, 0], x[:, 1], 'C0')
+        ax = plt.gca()
+        R[:, 0] *= self.pd[1]/2
+        R[:, 1] *= self.pd[2]/2
+        if draw_arrows:
+            ax.arrow(xc, yc, R[0, 0], R[1, 0], head_width = 5, head_length = 3, fc = 'c', ec = 'c', width = 1)
+            ax.arrow(xc, yc, R[0, 1], R[1, 1], head_width = 5, head_length = 3, fc = 'g', ec = 'g', width = 1)
+    
+    def makePatchVideos(self):
+        """
+        Make a video of each spatiotemporal patch, showing
+        where it is on the grid
+        """
+        plt.figure(figsize=(12, 6))
+        for i in range(self.patches.shape[0]):
+            t = int(np.round(self.Ts[i]))
+            patch = np.reshape(self.patches[i, :], self.pd)
+            for k in range(patch.shape[0]):
+                plt.clf()
+                plt.subplot(121)
+                self.draw_frame(t)
+                self.plotPatchBoundary(i)
+                plt.title("Patch %i"%i)
+                plt.subplot(122)
+                plt.imshow(patch[k, :, :], interpolation='none', aspect='auto', cmap='RdGy')
+                plt.title("Frame %i"%k)
+                plt.savefig("%i_%i.png"%(i, k))
 
     def plot_complex_3d_hist(self, res, log_density=True):
         """

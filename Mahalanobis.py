@@ -46,6 +46,20 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
         by this factor around each point
     verbose: boolean
         Whether to print progress and other information
+    
+    Returns
+    -------
+    {'gamma': ndarray(N, N)
+            The unmaksed squared Mahalanobis distance between all pairs of points
+     'mask': ndarray(N, N)
+            The binary mask at level maxeigs
+     'maskidx': ndarray(N, N)
+            The level at which each edge enters in the mask
+     'rank_est': int
+            Estimated intrinsic dimension of the point cloud 
+            (a biproduct of the Mahalanobis algorithm; one can check
+            how closely this matches the rank passed in)
+     }
     """
     N = X.shape[0]
     d = X.shape[1]
@@ -65,7 +79,7 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
     ws = np.zeros((N, maxeigs))
     vs = np.zeros((N, d, maxeigs))
     for i in range(N):
-        if verbose and i%100 == 0:
+        if verbose and i%500 == 0:
             print("%i of %i"%(i, N))
         Y = fn_ellipsoid(i, delta, n_points)
         C = (Y.T).dot(Y)
@@ -134,14 +148,43 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
     mask = np.maximum(mask, np.eye(mask.shape[0]))
     if verbose:
         print("Elapsed Time: %.3g"%(time.time()-tic))
-    return {'gamma':gamma, 'mask':mask, 'maskidx':maskidx, 'rank_est':rank_est, 'DSqr':DSqr, 'vs':vs, 'ws':ws}
+    return {'gamma':gamma, 'mask':mask, 'maskidx':maskidx, 'rank_est':rank_est}
 
 
-
-
-
-
-
+def getMahalanobisFiltrations(gamma, maskidx, eps, neigs=5, maxdim=2, verbose=False):
+    """
+    Compute diffusion maps and rips filtrations at different scales of the mask 
+    Parameters
+    ----------
+    gamma: ndarray(N, N)
+        The unmaksed squared Mahalanobis distance between all pairs of points
+    maskidx: ndarray(N, N)
+        The level at which each edge enters in the mask
+    eps: float
+        Epsilon for diffusion maps
+    neigs: int
+        Maximum number of eigenvectors to compute in diffusion maps
+    maxdim: int
+        Maximum dimension of homology to compute
+    verbose: boolean
+        Whether to print information about the computations
+    """
+    from ripser import ripser
+    Ys = []
+    alldgms = []
+    tic = time.time()
+    for thresh in range(1, np.max(maskidx)):
+        if verbose:
+            print(thresh, end=' ')
+        mask = np.array(maskidx >= thresh, dtype=float)
+        Y = getDiffusionMap(gamma, eps=eps, distance_matrix=True, mask=mask, neigs=neigs)
+        Ys.append(Y)
+        dgms = ripser(Y, n_perm=400, maxdim=2)['dgms']
+        alldgms.append(dgms)
+    if verbose:
+        print("Elapsed Time: %.3g"%(time.time()-tic))
+    return {'Ys':Ys, 'alldgms':alldgms}
+    
 
 
 """###################################################

@@ -19,7 +19,7 @@ def getSSM(X):
     D = np.sqrt(D)
     return D
 
-def getDiffusionMap(X, eps, distance_matrix=False, neigs=4, thresh=1e-10, mask=np.array([]), flip=True):
+def getDiffusionMap(X, eps, distance_matrix=False, neigs=4, thresh=1e-10, mask=np.array([]), flip=True, verbose=False):
     """
     Perform diffusion maps with a unit timestep, automatically
     normalizing for nonuniform sampling
@@ -40,9 +40,16 @@ def getDiffusionMap(X, eps, distance_matrix=False, neigs=4, thresh=1e-10, mask=n
         the Markov chain approximation
     mask: ndarray(N, N)
         A mask for the distances to include
+    flip: boolean
+        By default, the eigenvalues/eigenvectors are sorted in
+        increasing order.  If this is true, flip them around,
+        and also discard the largest one
+    verbose: boolean
+        Whether to print info about how the code is running
     """
-    tic = time.time()
-    print("Building diffusion map matrix...")
+    if verbose:
+        tic = time.time()
+        print("Building diffusion map matrix...")
     if distance_matrix:
         DSqr = X
     else:
@@ -61,12 +68,14 @@ def getDiffusionMap(X, eps, distance_matrix=False, neigs=4, thresh=1e-10, mask=n
     M = sparse.diags(1.0/dRow).tocsr()
     KHat = M @ KHat
     KHat.eliminate_zeros()
-    print("Elapsed Time: %.3g"%(time.time()-tic))
-    print("Solving eigen system (sparsity %.3g)..."%(KHat.nnz/float(DSqr.size)))
-    tic = time.time()
+    if verbose:
+        print("Elapsed Time: %.3g"%(time.time()-tic))
+        print("Solving eigen system (sparsity %.3g)..."%(KHat.nnz/float(DSqr.size)))
+        tic = time.time()
     # Solve a generalized eigenvalue problem
     w, v = sparse.linalg.eigsh(KHat, k=neigs, which='LM')
-    print("Elapsed Time: %.3g"%(time.time()-tic))
+    if verbose:
+        print("Elapsed Time: %.3g"%(time.time()-tic))
     Y = w[None, :]*v
     if flip:
         Y = np.fliplr(Y)

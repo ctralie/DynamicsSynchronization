@@ -15,6 +15,9 @@ class GL2DSimulation(PDE3D):
         res = sio.loadmat("cgle_2d%s.mat"%suffix)
         self.I = summary(res["data"])
 
+    def crop(self, tmin, tmax, xmin, xmax, ymin, ymax):
+        self.I = self.I[tmin:tmax, xmin:xmax, ymin:ymax]
+
     def saveFrames(self):
         vmin = np.min(self.I)
         v = (self.I-vmin)
@@ -30,9 +33,11 @@ class GL2DSimulation(PDE3D):
         I = np.moveaxis(self.I, 0, -1)
         ii, jj = np.meshgrid(np.arange(I.shape[0]), np.arange(I.shape[1]), indexing='ij')
         X = np.reshape(I, (I.shape[0]*I.shape[1], I.shape[2]))
+        print(X.shape)
         D = np.sum(X**2, 1)[:, None]
         DSqr = D + D.T - 2*X.dot(X.T)
-        Y = doDiffusionMaps(DSqr, X[:, 0], dMaxSqrCoeff=0.6, do_plot=False)
+        eps = 6e-4*np.max(DSqr)
+        Y = getDiffusionMap(DSqr, eps, distance_matrix=True, neigs=3, verbose=True)
         plt.scatter(Y[:, 0], Y[:, 1], c=X[:, 0])
         plt.show()
 
@@ -81,7 +86,22 @@ if __name__ == '__main__':
     #testRecoverSquareTimeSeries()
 
     #gl = GL2DSimulation('_locturb', summary=np.abs)
-    gl = GL2DSimulation('_custom')
+    gl = GL2DSimulation('_spiral', summary=np.real)
+    gl.crop(0, 100, 0, 256, 0, 256)
+    gl.makeObservations((100, 5, 5), nsamples=(1, 40, 40))
+    X = gl.patches
+    D = np.sum(X**2, 1)[:, None]
+    DSqr = D + D.T - 2*X.dot(X.T)
+    eps = 6e-4*np.max(DSqr)
+    Y = getDiffusionMap(DSqr, eps, distance_matrix=True, neigs=3, verbose=True)
+
+    f_interp = gl.getInterpolator()
+    coords = np.array([gl.Ts.flatten(), gl.Xs.flatten(), gl.Ys.flatten()]).T
+    C = f_interp(coords)
+
+    plt.scatter(Y[:, 0], Y[:, 1], c=C)
+    plt.show()
+
     #gl.saveFrames()
     #gl.plot_complex_3d_hist(res=50)
-    gl.plot_complex_distribution()
+    #gl.plot_complex_distribution()

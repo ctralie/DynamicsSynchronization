@@ -123,7 +123,7 @@ class PDE2D(PDEND):
         self.patches = self.f_patch(self.f_pointwise(patches))
         print("Elapsed time patch sampling: %.3g"%(time.time()-tic))
 
-    def makeObservations(self, pd, nsamples, uniform=True, periodic=True, rotate = False, \
+    def makeObservations(self, pd, nsamples, uniform=False, periodic=True, rotate = False, \
                             buff = 0.0, f_pointwise = lambda x: x, f_patch = lambda x: x):
         """
         Make random rectangular observations (possibly with rotation)
@@ -137,7 +137,7 @@ class PDE2D(PDEND):
         uniform: boolean
             Whether to sample the centers uniformly spatially
         periodic: boolean
-            Whether to enforce periodic boundary conditions
+            Whether to enforce spatial periodic boundary conditions
         rotate: boolean
             Whether to randomly rotate the patches
         buff: float
@@ -188,11 +188,11 @@ class PDE2D(PDEND):
                 else:
                     self.Xs = r + Y[:, 1]*(self.I.shape[1]-2*r)
             else:
-                self.Ts = r+np.random.rand(N)*(self.I.shape[0]-2*r)
+                self.Ts = r + np.random.rand(nsamples)*(self.I.shape[0]-2*r)
                 if periodic:
-                    self.Xs = np.random.rand(N)*self.I.shape[1]
+                    self.Xs = np.random.rand(nsamples)*self.I.shape[1]
                 else:
-                    self.Xs = r+np.random.rand(N)*(self.I.shape[1]-2*r)
+                    self.Xs = r + np.random.rand(nsamples)*(self.I.shape[1]-2*r)
         if rotate:
             self.thetas = np.random.rand(self.Xs.size)*2*np.pi
         else:
@@ -233,8 +233,9 @@ class PDE2D(PDEND):
         t0 = self.Ts[idx]
         # Sample centers of each neighboring patch
         # in a disc around the original patch
-        xc = x0 + delta*np.random.randn(n_points)
-        tc = t0 + delta*np.random.randn(n_points)
+        tcirc = 2*np.pi*np.linspace(0, 2*np.pi, n_points+1)[0:n_points]
+        xc = x0 + delta*np.cos(tcirc)
+        tc = t0 + delta*np.sin(tcirc)
         thetasorient = self.thetas[idx]*np.ones(n_points)
         if self.rotate_patches:
             # Randomly rotate each patch if using rotation invariant
@@ -326,7 +327,7 @@ class PDE2D(PDEND):
         thetasij = []
         for i in range(N):
             if i%100 == 0:
-                print("Estimating angles %i of %i"%(i, N))
+                print("%i"%i, end=' ')
             pi = self.get_patch(i)
             fft1 = np.array([])
             for j in range(i+1, N):

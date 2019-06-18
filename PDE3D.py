@@ -174,17 +174,18 @@ class PDE3D(PDEND):
         self.pd = pd
         self.f_pointwise = f_pointwise
         self.f_patch = f_patch
+        print(rs)
         if isinstance(nsamples, tuple):
             T, M, N = nsamples
             if periodic_x:
-                x = np.linspace(0, self.I.shape[1], M)
+                x = np.linspace(0, self.I.shape[1]-1, M)
             else:
-                x = np.linspace(rs[1], self.I.shape[1]-rs[1], M)
+                x = np.linspace(rs[1], self.I.shape[1]-rs[1]-1, M)
             if periodic_y:
-                y = np.linspace(0, self.I.shape[2], N)
+                y = np.linspace(0, self.I.shape[2]-1, N)
             else:
-                y = np.linspace(rs[2], self.I.shape[2]-rs[2], N)
-            t = np.linspace(rs[0], self.I.shape[0]-rs[0], T)
+                y = np.linspace(rs[2], self.I.shape[2]-rs[2]-1, N)
+            t = np.linspace(rs[0], self.I.shape[0]-rs[0]-1, T)
             t, x, y = np.meshgrid(t, x, y, indexing='ij')
             self.Ts = t.flatten()
             self.Xs = x.flatten()
@@ -195,25 +196,25 @@ class PDE3D(PDEND):
                 Y = np.random.rand(nsamples*20, 3)
                 perm, labmdas = getGreedyPerm(Y, nsamples)
                 Y = Y[perm, :]
-                self.Ts = rs[0] + Y[:, 0]*(self.I.shape[0]-2*rs[0])
+                self.Ts = rs[0] + Y[:, 0]*(self.I.shape[0]-2*rs[0]-1)
                 if periodic_x:
                     self.Xs = Y[:, 1]*self.I.shape[1]
                 else:
-                    self.Xs = rs[1] + Y[:, 1]*(self.I.shape[1]-2*rs[1])
+                    self.Xs = rs[1] + Y[:, 1]*(self.I.shape[1]-2*rs[1]-1)
                 if periodic_y:
                     self.Ys = Y[:, 2]*self.I.shape[2]
                 else:
-                    self.Ys = rs[2] + Y[:, 2]*(self.I.shape[2]-2*rs[2])
+                    self.Ys = rs[2] + Y[:, 2]*(self.I.shape[2]-2*rs[2]-1)
             else:
-                self.Ts = rs[0]+np.random.rand(N)*(self.I.shape[0]-2*rs[0])
+                self.Ts = rs[0]+np.random.rand(nsamples)*(self.I.shape[0]-2*rs[0]-1)
                 if periodic_x:
-                    self.Xs = np.random.rand(N)*self.I.shape[1]
+                    self.Xs = np.random.rand(nsamples)*self.I.shape[1]
                 else:
-                    self.Xs = rs[1] + np.random.rand(N)*(self.I.shape[1]-2*rs[1])
+                    self.Xs = rs[1] + np.random.rand(nsamples)*(self.I.shape[1]-2*rs[1]-1)
                 if periodic_y:
-                    self.Ys = np.random.rand(N)*self.I.shape[2]
+                    self.Ys = np.random.rand(nsamples)*self.I.shape[2]
                 else:
-                    self.Ys = rs[2] + np.random.rand(N)*(self.I.shape[2]-2*rs[2])
+                    self.Ys = rs[2] + np.random.rand(nsamples)*(self.I.shape[2]-2*rs[2]-1)
         if rotate:
             self.thetas = np.random.rand(self.Xs.size)*2*np.pi
         else:
@@ -257,8 +258,9 @@ class PDE3D(PDEND):
         t0 = self.Ts[idx]
         # Sample centers of each neighboring patch
         # in a disc around the original patch
-        xc = x0 + delta*np.random.randn(n_points)
-        yc = y0 + delta*np.random.randn(n_points)
+        tcirc = 2*np.pi*np.linspace(0, 2*np.pi, n_points+1)[0:n_points]
+        xc = x0 + delta*np.cos(tcirc)
+        yc = y0 + delta*np.sin(tcirc)
         thetasorient = self.thetas[idx]*np.ones(n_points)
         if self.rotate_patches:
             # Randomly rotate each patch if using rotation invariant
@@ -267,7 +269,7 @@ class PDE3D(PDEND):
         ss = np.sin(-thetasorient)
         xs = cs[:, None]*pdx[None, :] - ss[:, None]*pdy[None, :] + xc[:, None]
         ys = ss[:, None]*pdx[None, :] + cs[:, None]*pdy[None, :] + yc[:, None]
-        ts = np.ones((n_points, 1)) + pdt[None, :]
+        ts = t0 + np.zeros((n_points, 1)) + pdt[None, :]
         
         # Use interpolator to sample coordinates for all patches
         coords = np.array([ts.flatten(), xs.flatten(), ys.flatten()]).T

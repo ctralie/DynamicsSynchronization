@@ -151,9 +151,9 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
     return {'gamma':gamma, 'mask':mask, 'maskidx':maskidx, 'rank_est':rank_est}
 
 
-def getMahalanobisFiltrations(gamma, maskidx, eps, neigs=5, maxdim=2, verbose=False):
+def getMahalanobisAllThresh(gamma, maskidx, eps, neigs=5, maxdim=2, verbose=False):
     """
-    Compute diffusion maps and rips filtrations at different scales of the mask 
+    Compute diffusion maps and Rips filtrations at different scales of the mask 
     Parameters
     ----------
     gamma: ndarray(N, N)
@@ -173,7 +173,7 @@ def getMahalanobisFiltrations(gamma, maskidx, eps, neigs=5, maxdim=2, verbose=Fa
     Ys = []
     alldgms = []
     tic = time.time()
-    for thresh in range(1, np.max(maskidx)):
+    for thresh in range(np.max(maskidx)):
         if verbose:
             print(thresh, end=' ')
         mask = np.array(maskidx >= thresh, dtype=float)
@@ -184,6 +184,69 @@ def getMahalanobisFiltrations(gamma, maskidx, eps, neigs=5, maxdim=2, verbose=Fa
     if verbose:
         print("Elapsed Time: %.3g"%(time.time()-tic))
     return {'Ys':Ys, 'alldgms':alldgms}
+    
+
+def getTorusPersistenceScores(alldgms, do_plot=False):
+    """
+    Given a collection persistence diagrams, 
+    determine the one which is most likely a torus by looking 
+    at H0 to make sure there's only one connected component, 
+    and then by looking at the most persistent H2 and the 
+    two most persistent H1s.
+    Parameters
+    ----------
+    alldgms: N-length list of list of ndarray(M, 2)
+        Persistence diagrams for each point cloud
+    Returns
+    -------
+    {'scores':ndarray(N)
+            A list of scores for each point cloud,
+    'h2': ndarray(N)
+        A list of persistences of the most persistent H2 point,
+    'h11': ndarray(N)
+        A list of persistences of the most persistent H1 point,
+    'h12': ndarray(N)
+        A list of persistences of the second most persistent H2 point,
+    'h0': ndarray(N)
+        A list of the highest non-infinite persistences of H0
+    }
+    """
+    N = len(alldgms)
+    h2 = np.zeros(N)
+    h11 = np.zeros(N)
+    h12 = np.zeros(N)
+    h0 = np.zeros(N)
+    for i, dgms in enumerate(alldgms):
+        h1i = alldgms[i][1]
+        h2i = alldgms[i][2]
+        if h2i.size > 0:
+            h2[i] = np.max(h2i[:, 1]-h2i[:, 0])
+        idx = np.argsort(h1i[:, 0]-h1i[:, 1])
+        h1i = h1i[idx, :]
+        if h1i.size > 0:
+            h11[i] = h1i[0, 1] - h1i[0, 0]
+        if h1i.shape[0] > 1:
+            h12[i] = h1i[1, 1] - h1i[1, 0]
+        h0i = dgms[0]
+        h0i = h0i[np.isfinite(h0i[:, 1]), :]
+        if h0i.size > 0:
+            h0[i] = np.max(h0i[:, 1])
+    scores = np.array(h12)
+    scores[h0 > h12] = 0
+    if do_plot:
+        plt.plot(h2, 'C2')
+        plt.plot(h11, 'C1')
+        plt.plot(h12, 'C1', linestyle='--')
+        plt.plot(h0, 'C0')
+        thresh = 1.2*np.max(h2)
+        idx = np.argmax(scores)
+        plt.scatter([idx], [h12[idx]], 50, c='C1')
+        plt.ylim([0, thresh])
+        plt.legend(["$H_2$", "$H_1^1$", "$H_1^2$", "$H_0$"])
+        plt.xlabel("Mask Threshold")
+        plt.ylabel("Persistence")
+        plt.title("Persistences Varying Mahalanobis Mask")
+    return {'scores':scores, 'h2':h2, 'h11':h11, 'h12':h12, 'h0':h0}
     
 
 

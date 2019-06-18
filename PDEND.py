@@ -64,6 +64,28 @@ def approximate_rasterorder(X, Y, resy = 20):
     order[idx] = np.arange(X.shape[0])
     return idx
 
+def ball_rejection_sample(dim, n_points):
+    """
+    Sample points evenly in a ball via rejection sampling
+    Parameters
+    ----------
+    dim: int
+        Dimension of ball
+    n_points: int
+        Number of points in the ball
+    Returns
+    -------
+    X: ndarray(n_points, dim)
+        Sampled points in the ball
+    """
+    X = np.zeros((0, dim))
+    while X.shape[0] < n_points:
+        X2 = np.random.rand(n_points, dim) - 0.5
+        X2 *= 2
+        X2 = X2[np.sum(X2**2, 1) <= 1, :]
+        X = np.concatenate((X, X2), 0)
+    return X[0:n_points, :]
+
 class PDEND(object):
     def __init__(self):
         self.I = np.array([[]])

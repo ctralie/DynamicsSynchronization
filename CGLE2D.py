@@ -2,9 +2,11 @@ import numpy as np
 import scipy.io as sio
 import scipy.linalg as slinalg
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 from PDE3D import *
 from PatchDescriptors import *
 from DiffusionMaps import *
+from Mahalanobis import *
 import matplotlib.image as mpimage
 import matplotlib.colors as colors
 
@@ -87,20 +89,42 @@ if __name__ == '__main__':
 
     #gl = GL2DSimulation('_locturb', summary=np.abs)
     gl = GL2DSimulation('_spiral', summary=np.real)
-    gl.crop(0, 100, 0, 256, 0, 256)
-    gl.makeObservations((100, 5, 5), nsamples=(1, 40, 40))
-    X = gl.patches
-    D = np.sum(X**2, 1)[:, None]
-    DSqr = D + D.T - 2*X.dot(X.T)
-    eps = 6e-4*np.max(DSqr)
-    Y = getDiffusionMap(DSqr, eps, distance_matrix=True, neigs=3, verbose=True)
+
+    gl.crop(0, 110, 0, 256, 0, 256)
+    plt.imshow(gl.I[0, :, :])
+    plt.show()
+    gl.makeObservations((100, 10, 10), nsamples=(1, 40, 40))
 
     f_interp = gl.getInterpolator()
     coords = np.array([gl.Ts.flatten(), gl.Xs.flatten(), gl.Ys.flatten()]).T
-    C = f_interp(coords)
+    patch_centers = f_interp(coords)
 
-    plt.scatter(Y[:, 0], Y[:, 1], c=C)
-    plt.show()
+    delta = 5
+    n_points = 100
+    rank = 2
+    maxeigs = 100
+    dMaxSqr = 1000
+    res = getMahalanobisDists(gl.patches, gl.get_mahalanobis_ellipsoid, delta, \
+                        n_points=n_points, rank=rank, maxeigs=maxeigs, jacfac=4)
+    gamma, maskidx = res["gamma"], res["maskidx"]
+    plt.figure(figsize=(10, 10))
+    eps = np.max(gamma)
+    for thresh in range(10, np.max(maskidx)-10):
+        mask = maskidx >= thresh
+        Y = getDiffusionMap(gamma, eps=eps, distance_matrix=True, mask=mask, neigs=3, thresh=0)
+        plt.clf()
+        plt.subplot(221)
+        plt.imshow(largeimg(np.array(mask, dtype=float), limit=500))
+        plt.title("Thresh = %i"%thresh)
+        plt.subplot(222)
+        plt.scatter(Y[:, 0], Y[:, 1], 20, c=patch_centers)
+        plt.subplot(223)
+        plt.scatter(Y[:, 0], Y[:, 1], 20, c=gl.Ts.flatten())
+        plt.title("Ts")
+        plt.subplot(224)
+        plt.scatter(Y[:, 0], Y[:, 1], 20, c=gl.Xs.flatten())
+        plt.title("Xs")
+        plt.savefig("%i.png"%thresh, bbox_inches='tight')
 
     #gl.saveFrames()
     #gl.plot_complex_3d_hist(res=50)

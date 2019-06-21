@@ -238,6 +238,16 @@ def doICP_PDE2D(pde1, Y1, pde2, Y2, corresp = np.array([[]]), weights=np.array([
         RMS Normalize point clouds for scale
     do_plot: boolean
         Whether to plot correspondence plot and ICP iterations
+    
+    Returns
+    -------
+    {
+        'idxMin': list(NIters) of list(M)
+            A list of the corresponding indices in pde2 over all iterations
+            over the optimal result,
+        'rmses_iter': ndarray(NIters)
+            RMSEs at each iteration of the optimal result
+    }
     """
     from DiffusionMaps import getSSM
     if scale_norm:

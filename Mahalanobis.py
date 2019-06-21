@@ -151,7 +151,7 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
     return {'gamma':gamma, 'mask':mask, 'maskidx':maskidx, 'rank_est':rank_est}
 
 
-def getMahalanobisAllThresh(gamma, maskidx, eps, neigs=5, maxdim=2, verbose=False):
+def getMahalanobisAllThresh(gamma, maskidx, eps, neigs=5, flip=True, maxdim=2, verbose=False):
     """
     Compute diffusion maps and Rips filtrations at different scales of the mask 
     Parameters
@@ -164,6 +164,10 @@ def getMahalanobisAllThresh(gamma, maskidx, eps, neigs=5, maxdim=2, verbose=Fals
         Epsilon for diffusion maps
     neigs: int
         Maximum number of eigenvectors to compute in diffusion maps
+    flip: boolean
+        By default, the eigenvalues/eigenvectors are sorted in
+        increasing order.  If this is true, flip them around,
+        and also discard the largest one
     maxdim: int
         Maximum dimension of homology to compute
     verbose: boolean
@@ -177,7 +181,7 @@ def getMahalanobisAllThresh(gamma, maskidx, eps, neigs=5, maxdim=2, verbose=Fals
         if verbose:
             print(thresh, end=' ')
         mask = np.array(maskidx >= thresh, dtype=float)
-        Y = getDiffusionMap(gamma, eps=eps, distance_matrix=True, mask=mask, neigs=neigs)
+        Y = getDiffusionMap(gamma, eps=eps, distance_matrix=True, mask=mask, neigs=neigs, flip=flip)
         Ys.append(Y)
         dgms = ripser(Y, n_perm=400, maxdim=2)['dgms']
         alldgms.append(dgms)
@@ -243,9 +247,9 @@ def getTorusPersistenceScores(alldgms, do_plot=False):
         plt.scatter([idx], [h12[idx]], 50, c='C1')
         plt.ylim([0, thresh])
         plt.legend(["$H_2$", "$H_1^1$", "$H_1^2$", "$H_0$"])
-        plt.xlabel("Mask Threshold")
+        plt.xlabel("Covariance Threshold $\ell$ for Mask")
         plt.ylabel("Persistence")
-        plt.title("Persistences Varying Mahalanobis Mask")
+        plt.title("Persistences Varying Mahalanobis Mask (Chosen Threshold = %i)"%idx)
     return {'scores':scores, 'h2':h2, 'h11':h11, 'h12':h12, 'h0':h0}
     
 

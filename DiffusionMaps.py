@@ -4,7 +4,9 @@ from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA
 import scipy.io as sio
 from scipy import sparse
+from sklearn.neighbors import NearestNeighbors
 import time
+from LocalPCA import *
 
 def getSSM(X):
     """
@@ -73,7 +75,80 @@ def getDiffusionMap(X, eps, distance_matrix=False, neigs=4, thresh=1e-10, mask=n
         print("Solving eigen system (sparsity %.3g)..."%(KHat.nnz/float(DSqr.size)))
         tic = time.time()
     # Solve a generalized eigenvalue problem
-    w, v = sparse.linalg.eigsh(KHat, k=neigs, which='LM')
+    try:
+        w, v = sparse.linalg.eigsh(KHat, k=neigs, which='LM')
+    except:
+        w = np.zeros(neigs)
+        v = np.zeros((X.shape[0], neigs))
+    if verbose:
+        print("Elapsed Time: %.3g"%(time.time()-tic))
+    Y = w[None, :]*v
+    if flip:
+        Y = np.fliplr(Y)
+        Y = Y[:, 1::]
+    return Y
+
+def getDiffusionMapSparse(X, eps, K, neigs=4, thresh=1e-10, flip=True, n_jobs=8, verbose=False):
+    """
+    Perform diffusion maps with a unit timestep, automatically
+    normalizing for nonuniform sampling
+    Parameters
+    ----------
+    X: ndarray(N, d) or ndarray(N, N)
+        A point cloud with N points in d dimensions
+        or an NxN squared distance matrix
+    eps: float
+        Epsilon for diffusion maps
+    K: int
+        Number of neighbors to choose in the sparse approximation
+    neigs: int
+        Number of eigenvectors to compute
+    thresh: float
+        Threshold below which to zero out entries in
+        the Markov chain approximation
+    flip: boolean
+        By default, the eigenvalues/eigenvectors are sorted in
+        increasing order.  If this is true, flip them around,
+        and also discard the largest one
+    verbose: boolean
+        Whether to print info about how the code is running
+    """
+    diam = 0
+    I = np.array([])
+    J = np.array([])
+    V = np.array([])
+    N = X.shape[0]
+    if verbose:
+        tic = time.time()
+        print("Computing %i nearest neighbors..."%K)
+    nn = NearestNeighbors(n_neighbors=K+1, algorithm='auto', n_jobs=n_jobs).fit(X)
+    V, J = nn.kneighbors(X)
+    if verbose:
+        print("Elapsed Time: %.3g"%(time.time()-tic))
+    I = np.arange(N)[:, None]*np.ones((1, K+1))
+    V = np.array(V.flatten())**2
+    I = np.array(I.flatten(), dtype=np.int)
+    J = np.array(J.flatten(), dtype=np.int)
+    V = np.exp(-V/(2*eps))
+    DSqr = sparse.coo_matrix((V, (I, J)), shape=(N, N)) #K in paper
+    P = np.sum(DSqr, 1)
+    P[P == 0] = 1
+    V /= np.array(P[I]).flatten()
+    V /= np.array(P[J]).flatten()
+    I = I[V >= thresh]
+    J = J[V >= thresh]
+    V = V[V >= thresh]
+    DSqr = sparse.coo_matrix((V, (I, J)), shape=(N, N)) #KHat in paper
+    dRow = np.sum(DSqr, 1)
+    dRow[dRow == 0] = 1
+    V /= np.array(dRow[I]).flatten()
+    DSqr = sparse.coo_matrix((V, (I, J)), shape=(N, N)).tocsr()
+    DSqr.eliminate_zeros()
+    if verbose:
+        print("Solving eigen system (sparsity %.3g)..."%(DSqr.nnz/float(N**2)))
+        tic = time.time()
+    # Solve a generalized eigenvalue problem
+    w, v = sparse.linalg.eigsh(DSqr, k=neigs, which='LM')
     if verbose:
         print("Elapsed Time: %.3g"%(time.time()-tic))
     Y = w[None, :]*v
@@ -128,29 +203,32 @@ if __name__ == '__main__':
     c = plt.get_cmap('Spectral')
     C = c(np.array(np.round(255.0*np.arange(X.shape[0])/X.shape[0]), dtype=np.int32))
     C = C[:, 0:3]
-    for i, eps in enumerate(np.linspace(0.01, 2, 200)):
-        M = getDiffusionMap(X, eps, 10)
-        Y = M[:, [-2, -3, -4]]
-        SSM = getSSM(M)
 
-        plt.clf()
-        plt.subplot(221)
-        plt.imshow(M[:, 0:-1], aspect='auto')
-        plt.subplot(222)
-        plt.imshow(SSM, interpolation = 'nearest', cmap = 'afmhot')
-        plt.title("Diffusion Distance")
-        plt.subplot(223)
-        plt.scatter(Y[:, 0], Y[:, 1], c=C)
-        ax = plt.gca()
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_facecolor((0.15, 0.15, 0.15))
-        plt.axis('equal')
-        plt.title("2D Diffusion Map, $\epsilon = %g$"%eps)
+    i = 0
+    Y = getDiffusionMapSparse(X, 1, 20, verbose=True, flip=False)
+    Y = np.fliplr(Y)
+    Y = Y[:, 0:3]
+    #Y = getDiffusionMap(X, 1)
+    SSM = getSSM(Y)
 
-        ax = plt.gcf().add_subplot(224, projection='3d')
-        ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=C)
-        plt.title("3D Diffusion Map, $\epsilon = %g$"%eps)
-        
+    plt.clf()
+    plt.subplot(221)
+    plt.imshow(Y[:, 0:-1], aspect='auto')
+    plt.subplot(222)
+    plt.imshow(SSM, interpolation = 'nearest', cmap = 'afmhot')
+    plt.title("Diffusion Distance")
+    plt.subplot(223)
+    plt.scatter(Y[:, 0], Y[:, 1], c=C)
+    ax = plt.gca()
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_facecolor((0.15, 0.15, 0.15))
+    plt.axis('equal')
+    plt.title("2D Diffusion Map")
 
-        plt.savefig("%i.png"%i, bbox_inches='tight')
+    ax = plt.gcf().add_subplot(224, projection='3d')
+    ax.scatter(Y[:, 0], Y[:, 1], Y[:, 2], c=C)
+    plt.title("3D Diffusion Map")
+    
+
+    plt.savefig("%i.png"%i, bbox_inches='tight')

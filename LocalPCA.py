@@ -23,6 +23,8 @@ def getdists_sqr(X, i, exclude_self=True):
     dsqr = dsqr.flatten()
     if exclude_self:
         dsqr[i] = np.inf # Exclude the point itself
+    else:
+        dsqr[i] = 0
     return dsqr
 
 def getGreedyPerm(X, N = -1, verbose=True):
@@ -53,6 +55,8 @@ def getGreedyPerm(X, N = -1, verbose=True):
         perm[i] = idx
         lambdas[i] = ds[idx]
         ds = np.minimum(ds, getdists_sqr(X, idx, exclude_self=False))
+        if verbose and i%500 == 0:
+            print("%i of %i"%(i, N))
     return (perm, lambdas)
 
 def getLocalPCA(X, eps_pca, gammadim = 0.9, K_usqr = lambda u: np.exp(-5*u)*(u <= 1)):

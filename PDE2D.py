@@ -470,13 +470,21 @@ class PDE2D(PDEND):
         if draw_arrows:
             ax.arrow(xc, tc, R[0, 0], R[1, 0], head_width = 5, head_length = 3, fc = 'c', ec = 'c', width = 1)
             ax.arrow(xc, tc, R[0, 1], R[1, 1], head_width = 5, head_length = 3, fc = 'g', ec = 'g', width = 1)
-
-    def resort_byraster(self, resy=20):
-        idx = approximate_rasterorder(self.Xs, self.Ts, resy)
+    
+    def resort_byidx(self, idx):
         self.Xs = self.Xs[idx]
         self.Ts = self.Ts[idx]
         self.thetas = self.thetas[idx]
         self.patches = self.patches[idx, :]
+    
+    def resort_byrandom(self):
+        idx = np.random.permutation(self.Xs.size)
+        self.resort_byidx(idx)
+        return idx
+
+    def resort_byraster(self, resy=20):
+        idx = approximate_rasterorder(self.Xs, self.Ts, resy)
+        self.resort_byidx(idx)
         return idx
 
     def get_patch(self, idx):

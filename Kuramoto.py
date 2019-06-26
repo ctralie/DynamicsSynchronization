@@ -106,15 +106,10 @@ class KSSimulation(PDE2D):
         self.tcoords = self.get_t_periodcoords(self.ts[tcoords])
         PDE2D.completeObservations(self)
 
-    def resort_byraster(self, resy=20):
-        idx = approximate_rasterorder(self.Xs, self.Ts, resy)
-        self.Xs = self.Xs[idx]
-        self.Ts = self.Ts[idx]
-        self.thetas = self.thetas[idx]
-        self.patches = self.patches[idx, :]
+    def resort_byidx(self, idx):
+        PDE2D.resort_byidx(self, idx)
         self.xcoords = self.xcoords[idx]
         self.tcoords = self.tcoords[idx]
-        return idx
 
     def makeVideo(self, Y, D = np.array([]), skip=20, cmap='viridis'):
         """

@@ -246,7 +246,7 @@ def getTorusPersistenceScores(alldgms, do_plot=False):
         idx = np.argmax(scores)
         plt.scatter([idx], [h12[idx]], 50, c='C1')
         plt.ylim([0, thresh])
-        plt.legend(["$H_2$", "$H_1^1$", "$H_1^2$", "$H_0$"])
+        plt.legend(["$h_2^1$", "$h_1^1$", "$h_1^2$", "$h_0^1$"])
         plt.xlabel("Covariance Threshold $\ell$ for Mask")
         plt.ylabel("Persistence")
         plt.title("Persistences Varying Mahalanobis Mask (Chosen Threshold = %i)"%idx)

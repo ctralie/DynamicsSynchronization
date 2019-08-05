@@ -17,7 +17,7 @@ class KSSimulation(PDE2D):
         M, N = self.I.shape[0], self.I.shape[1]
         if co_rotating:
             self.make_corotating()
-        self.I = resize(self.I, (M*scale[0], N*scale[1]), anti_aliasing=True, mode='reflect')
+        self.I = resize(self.I, (int(M*scale[0]), int(N*scale[1])), anti_aliasing=True, mode='reflect')
         self.ts = np.linspace(res["tmin"].flatten(), res["tmax"].flatten(), self.I.shape[0])
         self.xs = np.linspace(0, 2*np.pi, self.I.shape[1]+1)[0:self.I.shape[1]]
     

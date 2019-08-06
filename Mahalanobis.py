@@ -151,7 +151,7 @@ def getMahalanobisDists(X, fn_ellipsoid, delta, n_points, rank, maxeigs = None, 
     return {'gamma':gamma, 'mask':mask, 'maskidx':maskidx, 'rank_est':rank_est}
 
 
-def getMahalanobisAllThresh(gamma, maskidx, eps, neigs=5, flip=True, maxdim=2, verbose=False):
+def getMahalanobisAllThresh(gamma, maskidx, eps, neigs=5, flip=True, maxdim=2, minthresh = 0, maxthresh = np.inf, verbose=False):
     """
     Compute diffusion maps and Rips filtrations at different scales of the mask 
     Parameters
@@ -170,6 +170,10 @@ def getMahalanobisAllThresh(gamma, maskidx, eps, neigs=5, flip=True, maxdim=2, v
         and also discard the largest one
     maxdim: int
         Maximum dimension of homology to compute
+    minthresh: int
+        Minimum threshold to compute
+    maxthresh: int
+        Maximum threshold to compute
     verbose: boolean
         Whether to print information about the computations
     """
@@ -177,7 +181,7 @@ def getMahalanobisAllThresh(gamma, maskidx, eps, neigs=5, flip=True, maxdim=2, v
     Ys = []
     alldgms = []
     tic = time.time()
-    for thresh in range(np.max(maskidx)):
+    for thresh in range(max(0, minthresh), min(np.max(maskidx), maxthresh)):
         if verbose:
             print(thresh, end=' ')
         mask = np.array(maskidx >= thresh, dtype=float)

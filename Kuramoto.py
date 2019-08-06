@@ -8,6 +8,16 @@ from PDE2D import *
 from Mahalanobis import *
 
 class KSSimulation(PDE2D):
+    """
+    Attributes
+    ----------
+    (In addition to attributes from PDE2D)
+
+    xcoords: ndarray(NObservations)
+        Locations of patch centers in radians
+    tcoords: ndarray(NObservations)
+        Locations of patch centers in seconds
+    """
     def __init__(self, co_rotating = False, scale=(1.0, 1.0), reldir='./'):
         PDE2D.__init__(self)
         res = sio.loadmat("%s/KS.mat"%reldir)

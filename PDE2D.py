@@ -200,7 +200,7 @@ class PDE2D(PDEND):
         
         self.completeObservations()
     
-    def get_mahalanobis_ellipsoid(self, idx, delta, n_points):
+    def get_mahalanobis_ellipsoid(self, idx, delta, n_points, uniform_circle=False):
         # function(ndarray(d) x0, int idx, float delta, int n_points) -> ndarray(n_points, d)
         """
         Return a centered ellipsoid
@@ -212,6 +212,10 @@ class PDE2D(PDEND):
             Radius of circle in spacetime to sample in preimage
         n_points: int
             Number of points to sample in the ellipsoid
+        uniform_circle: boolean
+            If true, draw points uniformly on the boundary of a circle.
+            If false, draw points randomly from a 2D gaussian of 
+            standard deviation delta
         Returns
         -------
         ellipsoid: ndarray(n_points, patchdim)
@@ -233,9 +237,13 @@ class PDE2D(PDEND):
         t0 = self.Ts[idx]
         # Sample centers of each neighboring patch
         # in a disc around the original patch
-        tcirc = 2*np.pi*np.linspace(0, 2*np.pi, n_points+1)[0:n_points]
-        xc = x0 + delta*np.cos(tcirc)
-        tc = t0 + delta*np.sin(tcirc)
+        if uniform_circle:
+            tcirc = 2*np.pi*np.linspace(0, 2*np.pi, n_points+1)[0:n_points]
+            xc = x0 + delta*np.cos(tcirc)
+            tc = t0 + delta*np.sin(tcirc)
+        else:
+            xc = x0 + delta*np.random.randn(n_points)
+            tc = t0 + delta*np.random.randn(n_points)
         thetasorient = self.thetas[idx]*np.ones(n_points)
         if self.rotate_patches:
             # Randomly rotate each patch if using rotation invariant

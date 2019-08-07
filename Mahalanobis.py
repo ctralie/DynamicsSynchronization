@@ -239,7 +239,7 @@ def getTorusPersistenceScores(alldgms, do_plot=False):
         h0i = h0i[np.isfinite(h0i[:, 1]), :]
         if h0i.size > 0:
             h0[i] = np.max(h0i[:, 1])
-    scores = np.array(h12)
+    scores = np.array(h12)*np.array(h2)
     scores[h0 > h12] = 0
     if do_plot:
         plt.plot(h2, 'C2')
